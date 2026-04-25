@@ -1,5 +1,7 @@
 # maolan-widgets
 
+[![crates.io](https://img.shields.io/crates/v/maolan-widgets.svg)](https://crates.io/crates/maolan-widgets)
+
 `maolan-widgets` is the reusable UI widget crate for the Maolan DAW project.
 It contains the custom `iced` components that the main application uses for
 timeline clips, piano-roll editing, mixer controls, meters, and related MIDI UI.
