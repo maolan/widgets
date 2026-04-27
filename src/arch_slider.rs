@@ -325,33 +325,6 @@ where
 }
 
 impl<'a, Message> ArchSlider<'a, Message> {
-    #[allow(dead_code)]
-    fn calculate_value(&self, cursor_position: Point, bounds: Rectangle) -> f32 {
-        let center = Point::new(
-            bounds.x + bounds.width / 2.0,
-            bounds.y + bounds.height / 2.0,
-        );
-        let dx = cursor_position.x - center.x;
-        let dy = cursor_position.y - center.y;
-        let mut angle = dy.atan2(dx);
-        if angle < 0.0 {
-            angle += 2.0 * PI;
-        }
-
-        let start = START_ANGLE;
-        let sweep = SWEEP_ANGLE;
-
-        let mut effective_angle = angle;
-        if effective_angle < start {
-            effective_angle += 2.0 * PI;
-        }
-
-        let clamped = effective_angle.clamp(start, start + sweep);
-        let normalized = (clamped - start) / sweep;
-        let value = self.range.start() + normalized * (self.range.end() - self.range.start());
-        self.clamp_to_step(value)
-    }
-
     fn clamp_to_step(&self, value: f32) -> f32 {
         let clamped = value.clamp(*self.range.start(), *self.range.end());
         let Some(step) = self.step else {
@@ -393,45 +366,6 @@ mod tests {
             state: widget::tree::State::new(state),
             children: Vec::new(),
         }
-    }
-
-    #[test]
-    fn calculate_value_clamps_to_range() {
-        let slider = ArchSlider::new(-1.0..=1.0, 0.0, |value| value);
-        let bounds = Rectangle {
-            x: 10.0,
-            y: 20.0,
-            width: 100.0,
-            height: 100.0,
-        };
-
-        // Bottom-left (start of arc) gives minimum value
-        assert_eq!(
-            slider.calculate_value(Point::new(10.0, 120.0), bounds),
-            -1.0
-        );
-        // Bottom-right (end of arc) gives maximum value
-        assert_eq!(
-            slider.calculate_value(Point::new(110.0, 120.0), bounds),
-            1.0
-        );
-        // Top (middle of arc) gives center value
-        assert!((slider.calculate_value(Point::new(60.0, 20.0), bounds) - 0.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn calculate_value_snaps_to_step() {
-        let slider = ArchSlider::new(-1.0..=1.0, 0.0, |value| value).step(0.1);
-        let bounds = Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width: 100.0,
-            height: 100.0,
-        };
-
-        // Top of arc is 0.0; small offsets should snap to nearest step
-        assert!((slider.calculate_value(Point::new(50.0, 10.0), bounds) - 0.0).abs() < 0.001);
-        assert!((slider.calculate_value(Point::new(50.0, 15.0), bounds) - 0.0).abs() < 0.001);
     }
 
     #[cfg(debug_assertions)]
