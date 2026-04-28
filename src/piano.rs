@@ -429,13 +429,6 @@ where
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let is_piano = self.midnam_note_names.is_empty();
-        eprintln!(
-            "[piano] octave={} names_count={} is_piano={} sample_names={:?}",
-            self.octave,
-            self.midnam_note_names.len(),
-            is_piano,
-            self.midnam_note_names.iter().take(3).collect::<Vec<_>>()
-        );
 
         if is_piano {
             if self.note_count == NOTES_PER_OCTAVE as u8 {
