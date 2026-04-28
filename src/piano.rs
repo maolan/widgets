@@ -272,6 +272,7 @@ where
     pub octave: u8,
     pub note_count: u8,
     pub midnam_note_names: HashMap<u8, String>,
+    /// Cached names count for widget identity
     on_press: Press,
     on_release: Release,
 }
@@ -427,19 +428,14 @@ where
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let is_piano = self.midnam_note_names.is_empty()
-            || self.midnam_note_names.values().all(|name| {
-                matches!(
-                    name.as_str(),
-                    "C" | "C#" | "D" | "D#" | "E" | "F" | "F#" | "G" | "G#" | "A" | "A#" | "B"
-                ) || name.starts_with('C')
-                    || name.starts_with('D')
-                    || name.starts_with('E')
-                    || name.starts_with('F')
-                    || name.starts_with('G')
-                    || name.starts_with('A')
-                    || name.starts_with('B')
-            });
+        let is_piano = self.midnam_note_names.is_empty();
+        eprintln!(
+            "[piano] octave={} names_count={} is_piano={} sample_names={:?}",
+            self.octave,
+            self.midnam_note_names.len(),
+            is_piano,
+            self.midnam_note_names.iter().take(3).collect::<Vec<_>>()
+        );
 
         if is_piano {
             if self.note_count == NOTES_PER_OCTAVE as u8 {
