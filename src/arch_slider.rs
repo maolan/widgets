@@ -346,8 +346,7 @@ where
                 if !state.is_dragging {
                     return;
                 }
-                let is_owner =
-                    ACTIVE_DRAG_OWNER.with(|owner| owner.get() == Some(state.owner_id));
+                let is_owner = ACTIVE_DRAG_OWNER.with(|owner| owner.get() == Some(state.owner_id));
                 if !is_owner {
                     state.is_dragging = false;
                     return;

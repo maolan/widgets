@@ -2038,7 +2038,7 @@ dependencies = [
 
 [[package]]
 name = "maolan-widgets"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "iced",
  "iced_fonts",
