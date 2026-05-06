@@ -8,12 +8,19 @@ use iced::mouse;
 use iced::widget::canvas::path::Arc as PathArc;
 use iced::widget::canvas::{Frame, Path, Stroke};
 use iced::{Color, Element, Event, Length, Point, Radians, Rectangle, Size, Vector};
+use std::cell::Cell;
 use std::f32::consts::PI;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 const START_ANGLE: f32 = 3.0 * PI / 4.0;
 const SWEEP_ANGLE: f32 = 3.0 * PI / 2.0;
 const END_ANGLE: f32 = START_ANGLE + SWEEP_ANGLE;
+static NEXT_OWNER_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    static ACTIVE_DRAG_OWNER: Cell<Option<u64>> = const { Cell::new(None) };
+}
 
 pub struct ArchSlider<'a, Message> {
     range: std::ops::RangeInclusive<f32>,
@@ -119,12 +126,24 @@ where
     ArchSlider::new(range, value, on_change)
 }
 
-#[derive(Default)]
 struct State {
+    owner_id: u64,
     is_dragging: bool,
     last_click_at: Option<Instant>,
     drag_start_y: f32,
     drag_start_value: f32,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            owner_id: NEXT_OWNER_ID.fetch_add(1, Ordering::Relaxed),
+            is_dragging: false,
+            last_click_at: None,
+            drag_start_y: 0.0,
+            drag_start_value: 0.0,
+        }
+    }
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for ArchSlider<'a, Message>
@@ -280,9 +299,20 @@ where
         let bounds = layout.bounds();
 
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-                if cursor.is_over(bounds) =>
-            {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if !cursor.is_over(bounds) {
+                    if state.is_dragging {
+                        state.is_dragging = false;
+                        ACTIVE_DRAG_OWNER.with(|owner| {
+                            if owner.get() == Some(state.owner_id) {
+                                owner.set(None);
+                            }
+                        });
+                    }
+                    return;
+                }
+
+                ACTIVE_DRAG_OWNER.with(|owner| owner.set(Some(state.owner_id)));
                 let now = Instant::now();
                 let is_double_click = state
                     .last_click_at
@@ -303,14 +333,26 @@ where
                 if state.is_dragging =>
             {
                 state.is_dragging = false;
+                ACTIVE_DRAG_OWNER.with(|owner| {
+                    if owner.get() == Some(state.owner_id) {
+                        owner.set(None);
+                    }
+                });
                 if let Some(message) = self.on_release.as_ref() {
                     shell.publish(message.clone());
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                if state.is_dragging
-                    && let Some(cursor_position) = cursor.position()
-                {
+                if !state.is_dragging {
+                    return;
+                }
+                let is_owner =
+                    ACTIVE_DRAG_OWNER.with(|owner| owner.get() == Some(state.owner_id));
+                if !is_owner {
+                    state.is_dragging = false;
+                    return;
+                }
+                if let Some(cursor_position) = cursor.position() {
                     let delta_y = state.drag_start_y - cursor_position.y;
                     let range_size = self.range.end() - self.range.start();
                     let value_change = (delta_y / 200.0) * range_size;
