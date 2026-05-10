@@ -1153,7 +1153,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             self.border
                         },
                         width: if self.is_selected { 2.0 } else { 1.0 },
-                        radius: self.radius.into(),
+                        radius: 8.0.into(),
                     },
                     ..container::Style::default()
                 });
@@ -1181,7 +1181,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                                         border: Border {
                                             color: Color::from_rgba(0.3, 0.3, 0.3, 1.0),
                                             width: 1.0,
-                                            radius: 3.0.into(),
+                                            radius: 8.0.into(),
                                         },
                                         ..container::Style::default()
                                     }),
@@ -1215,7 +1215,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                                         border: Border {
                                             color: Color::from_rgba(0.3, 0.3, 0.3, 1.0),
                                             width: 1.0,
-                                            radius: 3.0.into(),
+                                            radius: 8.0.into(),
                                         },
                                         ..container::Style::default()
                                     }),
@@ -1494,7 +1494,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                             self.border
                         },
                         width: if self.is_selected { 2.2 } else { 1.4 },
-                        radius: self.radius.into(),
+                        radius: 8.0.into(),
                     },
                     ..container::Style::default()
                 });
