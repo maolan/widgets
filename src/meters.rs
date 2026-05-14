@@ -253,9 +253,6 @@ mod tests {
 
     #[test]
     fn total_width_calculates_correctly_for_multiple_channels() {
-        // 1 channel: 3 + 3*2 = 9
-        // 2 channels: 3*2 + 2*1 + 3*2 = 6 + 2 + 6 = 14
-        // 3 channels: 3*3 + 2*2 + 3*2 = 9 + 4 + 6 = 19
         let w1 = total_width(1);
         let w2 = total_width(2);
         let w3 = total_width(3);

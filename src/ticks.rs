@@ -365,9 +365,8 @@ mod tests {
         let height = 110.0;
         let range = -90.0..=20.0;
 
-        // Above max should return 0 (top)
         assert_eq!(TicksCanvas::range_value_to_y(&range, 100.0, height), 0.0);
-        // Below min should return height (bottom)
+
         assert_eq!(
             TicksCanvas::range_value_to_y(&range, -200.0, height),
             height

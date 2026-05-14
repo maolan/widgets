@@ -1,10 +1,12 @@
 use crate::consts::DOUBLE_CLICK;
+#[cfg(test)]
+use iced::Point;
 use iced::advanced::Shell;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Tree, Widget};
 use iced::mouse;
-use iced::{Border, Color, Element, Event, Length, Point, Rectangle, Size};
+use iced::{Border, Color, Element, Event, Length, Rectangle, Size};
 use std::time::Instant;
 
 pub struct Slider<'a, Message> {
@@ -78,6 +80,8 @@ where
 struct State {
     is_dragging: bool,
     last_click_at: Option<Instant>,
+    drag_start_y: f32,
+    drag_start_value: f32,
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Slider<'a, Message>
@@ -249,8 +253,8 @@ where
                         .clamp(*self.range.start(), *self.range.end());
                     shell.publish((self.on_change)(default_value));
                 } else if let Some(cursor_position) = cursor.position() {
-                    let new_value = self.calculate_value(cursor_position, bounds);
-                    shell.publish((self.on_change)(new_value));
+                    state.drag_start_y = cursor_position.y;
+                    state.drag_start_value = self.value;
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -265,7 +269,11 @@ where
                 if state.is_dragging
                     && let Some(cursor_position) = cursor.position()
                 {
-                    let new_value = self.calculate_value(cursor_position, bounds);
+                    let delta_y = state.drag_start_y - cursor_position.y;
+                    let range_size = self.range.end() - self.range.start();
+                    let value_change = (delta_y / bounds.height.max(1.0)) * range_size;
+                    let raw_value = state.drag_start_value + value_change;
+                    let new_value = self.clamp_to_step(raw_value);
                     shell.publish((self.on_change)(new_value));
                 }
             }
@@ -275,7 +283,8 @@ where
 }
 
 impl<'a, Message> Slider<'a, Message> {
-    fn calculate_value(&self, cursor_position: Point, bounds: Rectangle) -> f32 {
+    #[cfg(test)]
+    fn calculate_value(&self, cursor_position: iced::Point, bounds: Rectangle) -> f32 {
         let y = cursor_position.y - bounds.y;
         let normalized = 1.0 - (y / bounds.height).clamp(0.0, 1.0);
         let value = self.range.start() + normalized * (self.range.end() - self.range.start());
@@ -356,7 +365,7 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
-    fn update_publishes_clicked_value() {
+    fn update_press_starts_drag_without_publishing() {
         let mut slider = Slider::new(0.0..=1.0, 0.5, |value| value).height(Length::Fixed(100.0));
         let mut tree = test_tree_with_state(State::default());
         let node = layout::Node::new(Size::new(14.0, 100.0));
@@ -379,6 +388,53 @@ mod tests {
             &viewport,
         );
 
+        assert!(messages.is_empty());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn update_drag_publishes_relative_value_change() {
+        let mut slider = Slider::new(0.0..=1.0, 0.5, |value| value).height(Length::Fixed(100.0));
+        let mut tree = test_tree_with_state(State::default());
+        let node = layout::Node::new(Size::new(14.0, 100.0));
+        let layout = Layout::new(&node);
+        let mut messages = Vec::new();
+        let renderer = ();
+        let mut clipboard = clipboard::Null;
+        let viewport = Rectangle::new(Point::ORIGIN, Size::new(14.0, 100.0));
+
+        {
+            let mut shell = Shell::new(&mut messages);
+            <Slider<'_, f32> as Widget<f32, iced::Theme, ()>>::update(
+                &mut slider,
+                &mut tree,
+                &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                layout,
+                mouse::Cursor::Available(Point::new(7.0, 75.0)),
+                &renderer,
+                &mut clipboard,
+                &mut shell,
+                &viewport,
+            );
+        }
+
+        {
+            let mut shell = Shell::new(&mut messages);
+            <Slider<'_, f32> as Widget<f32, iced::Theme, ()>>::update(
+                &mut slider,
+                &mut tree,
+                &Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(7.0, 50.0),
+                }),
+                layout,
+                mouse::Cursor::Available(Point::new(7.0, 50.0)),
+                &renderer,
+                &mut clipboard,
+                &mut shell,
+                &viewport,
+            );
+        }
+
         assert_eq!(messages.len(), 1);
         assert!((messages[0] - 0.75).abs() < 0.01);
     }
@@ -390,6 +446,7 @@ mod tests {
         let mut tree = test_tree_with_state(State {
             is_dragging: false,
             last_click_at: Some(Instant::now()),
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(14.0, 110.0));
         let layout = Layout::new(&node);
@@ -423,6 +480,7 @@ mod tests {
         let mut tree = test_tree_with_state(State {
             is_dragging: false,
             last_click_at: Some(Instant::now()),
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(14.0, 110.0));
         let layout = Layout::new(&node);
@@ -456,6 +514,7 @@ mod tests {
         let mut tree = test_tree_with_state(State {
             is_dragging: true,
             last_click_at: None,
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(14.0, 100.0));
         let layout = Layout::new(&node);

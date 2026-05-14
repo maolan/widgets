@@ -1,10 +1,12 @@
 use crate::consts::DOUBLE_CLICK;
+#[cfg(test)]
+use iced::Point;
 use iced::advanced::Shell;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Tree, Widget};
 use iced::mouse;
-use iced::{Border, Color, Element, Event, Length, Point, Rectangle, Size};
+use iced::{Border, Color, Element, Event, Length, Rectangle, Size};
 use std::time::Instant;
 
 pub struct HorizontalSlider<'a, Message> {
@@ -113,6 +115,8 @@ where
 struct State {
     is_dragging: bool,
     last_click_at: Option<Instant>,
+    drag_start_x: f32,
+    drag_start_value: f32,
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -286,8 +290,8 @@ where
                     shell.publish((self.on_change)(default_value));
                 } else if let Some(cursor_position) = cursor.position() {
                     state.is_dragging = true;
-                    let new_value = self.calculate_value(cursor_position, bounds);
-                    shell.publish((self.on_change)(new_value));
+                    state.drag_start_x = cursor_position.x;
+                    state.drag_start_value = self.value;
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -302,7 +306,12 @@ where
                 if state.is_dragging
                     && let Some(cursor_position) = cursor.position()
                 {
-                    let new_value = self.calculate_value(cursor_position, bounds);
+                    let usable_width = (bounds.width - self.handle_width).max(1.0);
+                    let delta_x = cursor_position.x - state.drag_start_x;
+                    let range_size = self.range.end() - self.range.start();
+                    let value_change = (delta_x / usable_width) * range_size;
+                    let raw_value = state.drag_start_value + value_change;
+                    let new_value = self.clamp_to_step(raw_value);
                     shell.publish((self.on_change)(new_value));
                 }
             }
@@ -312,7 +321,8 @@ where
 }
 
 impl<'a, Message> HorizontalSlider<'a, Message> {
-    fn calculate_value(&self, cursor_position: Point, bounds: Rectangle) -> f32 {
+    #[cfg(test)]
+    fn calculate_value(&self, cursor_position: iced::Point, bounds: Rectangle) -> f32 {
         let usable_width = (bounds.width - self.handle_width).max(0.0);
         if usable_width <= f32::EPSILON {
             return self.clamp_to_step(*self.range.start());
@@ -398,7 +408,7 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
-    fn update_publishes_clicked_value() {
+    fn update_press_starts_drag_without_publishing() {
         let mut slider =
             HorizontalSlider::new(-1.0..=1.0, 0.0, |value| value).width(Length::Fixed(100.0));
         let mut tree = test_tree_with_state(State::default());
@@ -422,8 +432,56 @@ mod tests {
             &viewport,
         );
 
+        assert!(messages.is_empty());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn update_drag_publishes_relative_value_change() {
+        let mut slider =
+            HorizontalSlider::new(-1.0..=1.0, 0.0, |value| value).width(Length::Fixed(100.0));
+        let mut tree = test_tree_with_state(State::default());
+        let node = layout::Node::new(Size::new(100.0, 14.0));
+        let layout = Layout::new(&node);
+        let mut messages = Vec::new();
+        let renderer = ();
+        let mut clipboard = clipboard::Null;
+        let viewport = Rectangle::new(Point::ORIGIN, Size::new(100.0, 14.0));
+
+        {
+            let mut shell = Shell::new(&mut messages);
+            <HorizontalSlider<'_, f32> as Widget<f32, iced::Theme, ()>>::update(
+                &mut slider,
+                &mut tree,
+                &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                layout,
+                mouse::Cursor::Available(Point::new(20.0, 7.0)),
+                &renderer,
+                &mut clipboard,
+                &mut shell,
+                &viewport,
+            );
+        }
+
+        {
+            let mut shell = Shell::new(&mut messages);
+            <HorizontalSlider<'_, f32> as Widget<f32, iced::Theme, ()>>::update(
+                &mut slider,
+                &mut tree,
+                &Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(44.0, 7.0),
+                }),
+                layout,
+                mouse::Cursor::Available(Point::new(44.0, 7.0)),
+                &renderer,
+                &mut clipboard,
+                &mut shell,
+                &viewport,
+            );
+        }
+
         assert_eq!(messages.len(), 1);
-        assert!((messages[0] - 0.5).abs() < 0.001);
+        assert!((messages[0] - 0.4898).abs() < 0.001);
     }
 
     #[cfg(debug_assertions)]
@@ -434,6 +492,7 @@ mod tests {
         let mut tree = test_tree_with_state(State {
             is_dragging: false,
             last_click_at: Some(Instant::now()),
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(100.0, 12.0));
         let layout = Layout::new(&node);
@@ -467,6 +526,7 @@ mod tests {
         let mut tree = test_tree_with_state(State {
             is_dragging: false,
             last_click_at: Some(Instant::now()),
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(100.0, 12.0));
         let layout = Layout::new(&node);
@@ -500,6 +560,7 @@ mod tests {
         let mut tree = test_tree_with_state(State {
             is_dragging: true,
             last_click_at: None,
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(100.0, 12.0));
         let layout = Layout::new(&node);

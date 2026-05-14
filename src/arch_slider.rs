@@ -204,7 +204,6 @@ where
         renderer.with_translation(Vector::new(bounds.x, bounds.y), |renderer| {
             let mut frame = Frame::new(renderer, bounds.size());
 
-            // Draw border arc (slightly thicker)
             let border_path = Path::new(|builder| {
                 builder.arc(PathArc {
                     center: Point::new(center.x, center.y),
@@ -220,7 +219,6 @@ where
                     .with_color(border_color),
             );
 
-            // Draw background track
             let track_path = Path::new(|builder| {
                 builder.arc(PathArc {
                     center: Point::new(center.x, center.y),
@@ -236,7 +234,6 @@ where
                     .with_color(back_color),
             );
 
-            // Draw filled portion
             let (filled_start, filled_end) = match self.fill_mode {
                 FillMode::Center => {
                     let center_angle = START_ANGLE + SWEEP_ANGLE / 2.0;
@@ -266,7 +263,6 @@ where
                 );
             }
 
-            // Draw handle
             let handle_x = center.x + current_angle.cos() * radius;
             let handle_y = center.y + current_angle.sin() * radius;
             let handle_path = Path::circle(Point::new(handle_x, handle_y), self.handle_radius);
@@ -422,7 +418,6 @@ mod tests {
         let mut clipboard = clipboard::Null;
         let viewport = Rectangle::new(Point::ORIGIN, Size::new(100.0, 100.0));
 
-        // Click to start dragging
         {
             let mut shell = Shell::new(&mut messages);
             <ArchSlider<'_, f32> as Widget<f32, iced::Theme, ()>>::update(
@@ -439,7 +434,6 @@ mod tests {
         }
         assert!(messages.is_empty());
 
-        // Drag up 100 pixels should cover half the range (200px = full range, so +1.0)
         {
             let mut shell = Shell::new(&mut messages);
             <ArchSlider<'_, f32> as Widget<f32, iced::Theme, ()>>::update(
@@ -471,6 +465,7 @@ mod tests {
             last_click_at: Some(Instant::now()),
             drag_start_y: 0.0,
             drag_start_value: 0.0,
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(100.0, 100.0));
         let layout = Layout::new(&node);
@@ -506,6 +501,7 @@ mod tests {
             last_click_at: Some(Instant::now()),
             drag_start_y: 0.0,
             drag_start_value: 0.0,
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(100.0, 100.0));
         let layout = Layout::new(&node);
@@ -541,6 +537,7 @@ mod tests {
             last_click_at: None,
             drag_start_y: 0.0,
             drag_start_value: 0.0,
+            ..State::default()
         });
         let node = layout::Node::new(Size::new(100.0, 100.0));
         let layout = Layout::new(&node);
