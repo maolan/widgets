@@ -252,6 +252,7 @@ where
                         .double_click_reset
                         .clamp(*self.range.start(), *self.range.end());
                     shell.publish((self.on_change)(default_value));
+                    shell.capture_event();
                 } else if let Some(cursor_position) = cursor.position() {
                     state.drag_start_y = cursor_position.y;
                     state.drag_start_value = self.value;

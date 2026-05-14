@@ -288,6 +288,7 @@ where
                         .double_click_reset
                         .clamp(*self.range.start(), *self.range.end());
                     shell.publish((self.on_change)(default_value));
+                    shell.capture_event();
                 } else if let Some(cursor_position) = cursor.position() {
                     state.is_dragging = true;
                     state.drag_start_x = cursor_position.x;
