@@ -32,6 +32,7 @@ pub struct AudioClipData {
     pub offset: usize,
     pub muted: bool,
     pub max_length_samples: usize,
+    pub source_length_samples: usize,
     pub peaks: ClipPeaks,
     pub fade_enabled: bool,
     pub fade_in_samples: usize,
@@ -309,6 +310,7 @@ struct WaveformCanvas {
     clip_offset: usize,
     clip_length: usize,
     max_length: usize,
+    source_length: usize,
 }
 
 impl WaveformCanvas {
@@ -319,6 +321,7 @@ impl WaveformCanvas {
         self.clip_offset.hash(&mut hasher);
         self.clip_length.hash(&mut hasher);
         self.max_length.hash(&mut hasher);
+        self.source_length.hash(&mut hasher);
         self.peaks.len().hash(&mut hasher);
         for channel in self.peaks.iter() {
             channel.len().hash(&mut hasher);
@@ -459,7 +462,12 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                     let center_y = channel_top + channel_h * 0.5;
                     let half_span = (channel_h * 0.45).max(1.0);
                     let total_peaks = channel_peaks.len();
-                    let max_len = self.max_length.max(1);
+                    let max_len = if self.source_length > 0 {
+                        self.source_length
+                    } else {
+                        self.max_length
+                    }
+                    .max(1);
                     let start_idx = ((self.clip_offset * total_peaks) / max_len)
                         .min(total_peaks.saturating_sub(1));
                     let clip_end_sample = self
@@ -511,7 +519,14 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                         let source_start = self.clip_offset.saturating_sub(source_margin_samples);
                         let source_end = clip_end_sample
                             .saturating_add(source_margin_samples)
-                            .min(self.max_length.max(1));
+                            .min(
+                                if self.source_length > 0 {
+                                    self.source_length
+                                } else {
+                                    self.max_length
+                                }
+                                .max(1),
+                            );
                         self.source_wav_path.as_ref().and_then(|path| {
                             Self::source_column_peaks(
                                 path,
@@ -839,6 +854,7 @@ fn audio_waveform_overlay<Message: 'static>(
     clip_offset: usize,
     clip_length: usize,
     max_length: usize,
+    source_length: usize,
 ) -> Element<'static, Message> {
     canvas(WaveformCanvas {
         peaks,
@@ -846,6 +862,7 @@ fn audio_waveform_overlay<Message: 'static>(
         clip_offset,
         clip_length,
         max_length,
+        source_length,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -879,6 +896,7 @@ fn grouped_audio_waveform_overlay<Message: 'static>(
                 child.offset,
                 child.length,
                 child.max_length_samples,
+                child.source_length_samples,
             )
         };
         stack = stack.push(
@@ -946,11 +964,12 @@ impl<Message> AudioClip<Message> {
         clip_offset: usize,
         clip_length: usize,
         max_length: usize,
+        source_length: usize,
     ) -> Element<'static, Message>
     where
         Message: 'static,
     {
-        audio_waveform_overlay(peaks, source_wav_path, clip_offset, clip_length, max_length)
+        audio_waveform_overlay(peaks, source_wav_path, clip_offset, clip_length, max_length, source_length)
     }
 }
 
@@ -1048,6 +1067,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                         self.clip.offset,
                         self.clip.length,
                         self.clip.max_length_samples,
+                        self.clip.source_length_samples,
                     ),
                     clip_label_overlay(self.label),
                 ]))
@@ -1109,6 +1129,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             self.clip.offset,
                             self.clip.length,
                             self.clip.max_length_samples,
+                            self.clip.source_length_samples,
                         )
                     },
                     clip_label_overlay(self.label),
