@@ -517,16 +517,14 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                             source_mode_bin_w = 1.0;
                         }
                         let source_start = self.clip_offset.saturating_sub(source_margin_samples);
-                        let source_end = clip_end_sample
-                            .saturating_add(source_margin_samples)
-                            .min(
-                                if self.source_length > 0 {
-                                    self.source_length
-                                } else {
-                                    self.max_length
-                                }
-                                .max(1),
-                            );
+                        let source_end = clip_end_sample.saturating_add(source_margin_samples).min(
+                            if self.source_length > 0 {
+                                self.source_length
+                            } else {
+                                self.max_length
+                            }
+                            .max(1),
+                        );
                         self.source_wav_path.as_ref().and_then(|path| {
                             Self::source_column_peaks(
                                 path,
@@ -969,7 +967,14 @@ impl<Message> AudioClip<Message> {
     where
         Message: 'static,
     {
-        audio_waveform_overlay(peaks, source_wav_path, clip_offset, clip_length, max_length, source_length)
+        audio_waveform_overlay(
+            peaks,
+            source_wav_path,
+            clip_offset,
+            clip_length,
+            max_length,
+            source_length,
+        )
     }
 }
 
