@@ -969,7 +969,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
             interaction: None,
             background: None,
             border_color: None,
-            radius: 3.0,
+            radius: 8.0,
             mode: AudioClipMode::Widget,
             base_color: Color::from_rgb8(68, 88, 132),
             selected_base_color: Color::from_rgb8(96, 126, 186),
@@ -1131,6 +1131,10 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             normal_alpha,
                             true,
                         )),
+                        border: Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
                         ..container::Style::default()
                     }
                 });
@@ -1474,6 +1478,10 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                                     normal_alpha,
                                     false,
                                 )),
+                                border: Border {
+                                    radius: 8.0.into(),
+                                    ..Default::default()
+                                },
                                 ..container::Style::default()
                             }
                         })
