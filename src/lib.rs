@@ -5,6 +5,7 @@ pub mod controller;
 pub mod drum;
 pub mod horizontal_scrollbar;
 pub mod horizontal_slider;
+pub mod menu;
 pub mod meters;
 pub mod midi;
 pub mod note_area;
