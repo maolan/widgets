@@ -38,6 +38,7 @@ pub struct AudioClipData {
     pub fade_in_samples: usize,
     pub fade_out_samples: usize,
     pub grouped_clips: Vec<AudioClipData>,
+    pub stretch_ratio: f32,
 }
 
 impl AudioClipData {
@@ -311,6 +312,7 @@ struct WaveformCanvas {
     clip_length: usize,
     max_length: usize,
     source_length: usize,
+    stretch_ratio: f32,
 }
 
 impl WaveformCanvas {
@@ -322,6 +324,7 @@ impl WaveformCanvas {
         self.clip_length.hash(&mut hasher);
         self.max_length.hash(&mut hasher);
         self.source_length.hash(&mut hasher);
+        self.stretch_ratio.to_bits().hash(&mut hasher);
         self.peaks.len().hash(&mut hasher);
         for channel in self.peaks.iter() {
             channel.len().hash(&mut hasher);
@@ -470,9 +473,15 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                     .max(1);
                     let start_idx = ((self.clip_offset * total_peaks) / max_len)
                         .min(total_peaks.saturating_sub(1));
+                    let effective_length = if self.stretch_ratio > 0.0 && self.stretch_ratio != 1.0
+                    {
+                        ((self.clip_length as f32 / self.stretch_ratio).ceil() as usize).max(1)
+                    } else {
+                        self.clip_length
+                    };
                     let clip_end_sample = self
                         .clip_offset
-                        .saturating_add(self.clip_length)
+                        .saturating_add(effective_length)
                         .min(max_len);
                     let mut end_idx = ((clip_end_sample * total_peaks) / max_len).min(total_peaks);
                     if end_idx <= start_idx {
@@ -853,6 +862,7 @@ fn audio_waveform_overlay<Message: 'static>(
     clip_length: usize,
     max_length: usize,
     source_length: usize,
+    stretch_ratio: f32,
 ) -> Element<'static, Message> {
     canvas(WaveformCanvas {
         peaks,
@@ -861,6 +871,7 @@ fn audio_waveform_overlay<Message: 'static>(
         clip_length,
         max_length,
         source_length,
+        stretch_ratio,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -895,6 +906,7 @@ fn grouped_audio_waveform_overlay<Message: 'static>(
                 child.length,
                 child.max_length_samples,
                 child.source_length_samples,
+                child.stretch_ratio,
             )
         };
         stack = stack.push(
@@ -974,6 +986,7 @@ impl<Message> AudioClip<Message> {
             clip_length,
             max_length,
             source_length,
+            1.0,
         )
     }
 }
@@ -1073,6 +1086,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                         self.clip.length,
                         self.clip.max_length_samples,
                         self.clip.source_length_samples,
+                        self.clip.stretch_ratio,
                     ),
                     clip_label_overlay(self.label),
                 ]))
@@ -1135,6 +1149,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             self.clip.length,
                             self.clip.max_length_samples,
                             self.clip.source_length_samples,
+                            self.clip.stretch_ratio,
                         )
                     },
                     clip_label_overlay(self.label),
