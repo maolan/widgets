@@ -1119,7 +1119,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                         .width(Length::Fixed(self.resize_handle_width))
                         .height(Length::Fill),
                 )
-                .interaction(mouse::Interaction::ResizingColumn)
+                .interaction(mouse::Interaction::Pointer)
                 .on_enter(interaction.edges.left_hover_enter.clone())
                 .on_exit(interaction.edges.left_hover_exit.clone())
                 .on_press(interaction.edges.left_press.clone());
@@ -1128,7 +1128,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                         .width(Length::Fixed(self.resize_handle_width))
                         .height(Length::Fill),
                 )
-                .interaction(mouse::Interaction::ResizingColumn)
+                .interaction(mouse::Interaction::Pointer)
                 .on_enter(interaction.edges.right_hover_enter.clone())
                 .on_exit(interaction.edges.right_hover_exit.clone())
                 .on_press(interaction.edges.right_press.clone());
@@ -1180,28 +1180,22 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                     }
                 });
 
-                let clip_widget = container(Stack::with_children(vec![
-                    clip_content.into(),
-                    pin(left_edge_zone).position(Point::new(0.0, 0.0)).into(),
-                    pin(right_edge_zone)
-                        .position(Point::new(self.clip_width - self.resize_handle_width, 0.0))
-                        .into(),
-                ]))
-                .width(Length::Fixed(self.clip_width))
-                .height(Length::Fixed(self.clip_height))
-                .style(move |_theme| container::Style {
-                    background: None,
-                    border: Border {
-                        color: if self.is_selected {
-                            self.selected_border
-                        } else {
-                            self.border
+                let clip_widget = container(clip_content)
+                    .width(Length::Fixed(self.clip_width))
+                    .height(Length::Fixed(self.clip_height))
+                    .style(move |_theme| container::Style {
+                        background: None,
+                        border: Border {
+                            color: if self.is_selected {
+                                self.selected_border
+                            } else {
+                                self.border
+                            },
+                            width: if self.is_selected { 2.0 } else { 1.0 },
+                            radius: 8.0.into(),
                         },
-                        width: if self.is_selected { 2.0 } else { 1.0 },
-                        radius: 8.0.into(),
-                    },
-                    ..container::Style::default()
-                });
+                        ..container::Style::default()
+                    });
 
                 let clip_with_fades: Element<'static, Message> = if self.clip.fade_enabled {
                     let fade_in_width = visible_fade_overlay_width(
@@ -1286,9 +1280,19 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                     clip_widget.into()
                 };
 
-                let base = mouse_area(clip_with_fades);
+                // Keep resize zones above waveform, label, and fade overlays so
+                // their cursor and press handling cannot be shadowed by a
+                // visual layer.
+                let interactive_clip = Stack::with_children(vec![
+                    clip_with_fades,
+                    pin(left_edge_zone).position(Point::new(0.0, 0.0)).into(),
+                    pin(right_edge_zone)
+                        .position(Point::new(self.clip_width - self.resize_handle_width, 0.0))
+                        .into(),
+                ]);
+                let base = mouse_area(interactive_clip);
                 let base = if self.left_handle_hovered || self.right_handle_hovered {
-                    base.interaction(mouse::Interaction::ResizingColumn)
+                    base.interaction(mouse::Interaction::Pointer)
                 } else {
                     base
                 };
@@ -1471,7 +1475,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                         .width(Length::Fixed(self.resize_handle_width))
                         .height(Length::Fill),
                 )
-                .interaction(mouse::Interaction::ResizingColumn)
+                .interaction(mouse::Interaction::Pointer)
                 .on_enter(interaction.edges.left_hover_enter.clone())
                 .on_exit(interaction.edges.left_hover_exit.clone())
                 .on_press(interaction.edges.left_press.clone());
@@ -1480,7 +1484,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                         .width(Length::Fixed(self.resize_handle_width))
                         .height(Length::Fill),
                 )
-                .interaction(mouse::Interaction::ResizingColumn)
+                .interaction(mouse::Interaction::Pointer)
                 .on_enter(interaction.edges.right_hover_enter.clone())
                 .on_exit(interaction.edges.right_hover_exit.clone())
                 .on_press(interaction.edges.right_press.clone());
@@ -1496,7 +1500,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                 clip_layers.push(clip_label_overlay(self.label));
 
                 let clip_muted = self.clip.muted;
-                let clip_widget = container(Stack::with_children(vec![
+                let clip_widget = container(
                     container(Stack::with_children(clip_layers))
                         .width(Length::Fill)
                         .height(Length::Fill)
@@ -1525,13 +1529,8 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                                 },
                                 ..container::Style::default()
                             }
-                        })
-                        .into(),
-                    pin(left_edge_zone).position(Point::new(0.0, 0.0)).into(),
-                    pin(right_edge_zone)
-                        .position(Point::new(self.clip_width - self.resize_handle_width, 0.0))
-                        .into(),
-                ]))
+                        }),
+                )
                 .width(Length::Fixed(self.clip_width))
                 .height(Length::Fixed(self.clip_height))
                 .style(move |_theme| container::Style {
@@ -1548,9 +1547,16 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                     ..container::Style::default()
                 });
 
-                let base = mouse_area(clip_widget);
+                let interactive_clip = Stack::with_children(vec![
+                    clip_widget.into(),
+                    pin(left_edge_zone).position(Point::new(0.0, 0.0)).into(),
+                    pin(right_edge_zone)
+                        .position(Point::new(self.clip_width - self.resize_handle_width, 0.0))
+                        .into(),
+                ]);
+                let base = mouse_area(interactive_clip);
                 let base = if self.left_handle_hovered || self.right_handle_hovered {
-                    base.interaction(mouse::Interaction::ResizingColumn)
+                    base.interaction(mouse::Interaction::Pointer)
                 } else {
                     base
                 };
