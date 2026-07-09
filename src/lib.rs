@@ -2,6 +2,7 @@ pub mod arch_slider;
 pub mod clip;
 mod consts;
 pub mod controller;
+pub mod curve_editor;
 pub mod drum;
 pub mod horizontal_scrollbar;
 pub mod horizontal_slider;
