@@ -4,7 +4,7 @@ use iced::{
     widget::{
         Space, Stack, canvas,
         canvas::{Frame, Geometry, Path},
-        column, container, mouse_area, pin, text,
+        container, mouse_area, pin, text,
     },
 };
 use std::{
@@ -23,6 +23,9 @@ const CHECKPOINTS: usize = 16;
 const MAX_RENDER_COLUMNS: usize = 32_767;
 const RENDER_MARGIN_COLUMNS: usize = 2;
 const DEFAULT_RESIZE_HANDLE_WIDTH: f32 = 5.0;
+const CLIP_NORMAL_ALPHA: f32 = 0.68;
+const CLIP_SELECTED_ALPHA: f32 = 0.78;
+const CLIP_MUTED_ALPHA: f32 = 0.34;
 
 #[derive(Debug, Clone, Default)]
 pub struct AudioClipData {
@@ -122,23 +125,69 @@ fn trim_label_to_width(label: &str, width_px: f32) -> String {
     label.chars().take(max_chars).collect()
 }
 
-fn clip_label_overlay<Message: 'static>(label: String) -> Element<'static, Message> {
-    container(
-        column![
-            Space::new().height(Length::FillPortion(1)),
-            text(label)
-                .size(12)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Left),
-            Space::new().height(Length::FillPortion(1)),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill),
+fn clip_label_overlay<Message: 'static>(
+    label: String,
+    clip_width: f32,
+    clip_height: f32,
+    corner_radius: f32,
+    vertical_alignment: iced::alignment::Vertical,
+) -> Element<'static, Message> {
+    let padding = corner_radius.max(0.0);
+    let text_area_width = (clip_width - (padding * 2.0)).max(1.0);
+    let (text_area_height, y) = match vertical_alignment {
+        iced::alignment::Vertical::Top => ((clip_height - (padding * 2.0)).max(1.0), padding),
+        iced::alignment::Vertical::Center => (clip_height.max(1.0), 0.0),
+        iced::alignment::Vertical::Bottom => ((clip_height - (padding * 2.0)).max(1.0), padding),
+    };
+
+    pin(container(
+        text(label)
+            .size(12)
+            .width(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Left),
     )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding([0, 5])
+    .width(Length::Fixed(text_area_width))
+    .height(Length::Fixed(text_area_height))
+    .align_x(iced::alignment::Horizontal::Left)
+    .align_y(vertical_alignment))
+    .position(Point::new(padding, y))
     .into()
+}
+
+fn audio_clip_label_overlay<Message: 'static>(
+    label: String,
+    clip_width: f32,
+    clip_height: f32,
+    corner_radius: f32,
+    channels: usize,
+) -> Element<'static, Message> {
+    let vertical_alignment = if channels.max(1).is_multiple_of(2) {
+        iced::alignment::Vertical::Center
+    } else {
+        iced::alignment::Vertical::Top
+    };
+    clip_label_overlay(
+        label,
+        clip_width,
+        clip_height,
+        corner_radius,
+        vertical_alignment,
+    )
+}
+
+fn midi_clip_label_overlay<Message: 'static>(
+    label: String,
+    clip_width: f32,
+    clip_height: f32,
+    corner_radius: f32,
+) -> Element<'static, Message> {
+    clip_label_overlay(
+        label,
+        clip_width,
+        clip_height,
+        corner_radius,
+        iced::alignment::Vertical::Top,
+    )
 }
 
 fn brighten(color: Color, amount: f32) -> Color {
@@ -1088,7 +1137,13 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                         self.clip.source_length_samples,
                         self.clip.stretch_ratio,
                     ),
-                    clip_label_overlay(self.label),
+                    audio_clip_label_overlay(
+                        self.label,
+                        self.clip_width,
+                        self.clip_height,
+                        self.radius,
+                        self.clip.peaks.len(),
+                    ),
                 ]))
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -1152,7 +1207,13 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             self.clip.stretch_ratio,
                         )
                     },
-                    clip_label_overlay(self.label),
+                    audio_clip_label_overlay(
+                        self.label,
+                        self.clip_width,
+                        self.clip_height,
+                        self.radius,
+                        self.clip.peaks.len(),
+                    ),
                 ]))
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -1163,8 +1224,16 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                     } else {
                         self.base_color
                     };
-                    let (muted_alpha, normal_alpha) =
-                        if clip_muted { (0.45, 0.45) } else { (1.0, 1.0) };
+                    let normal_alpha = if self.is_selected {
+                        CLIP_SELECTED_ALPHA
+                    } else {
+                        CLIP_NORMAL_ALPHA
+                    };
+                    let muted_alpha = if clip_muted {
+                        CLIP_MUTED_ALPHA
+                    } else {
+                        normal_alpha
+                    };
                     container::Style {
                         background: Some(clip_two_edge_gradient(
                             base,
@@ -1445,7 +1514,12 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                         self.clip.length.max(1),
                     ));
                 }
-                preview_layers.push(clip_label_overlay(self.label));
+                preview_layers.push(midi_clip_label_overlay(
+                    self.label,
+                    self.clip_width,
+                    self.clip_height,
+                    self.radius,
+                ));
                 let preview_content = container(Stack::with_children(preview_layers))
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -1497,7 +1571,12 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                         self.clip.length.max(1),
                     ));
                 }
-                clip_layers.push(clip_label_overlay(self.label));
+                clip_layers.push(midi_clip_label_overlay(
+                    self.label,
+                    self.clip_width,
+                    self.clip_height,
+                    self.radius,
+                ));
 
                 let clip_muted = self.clip.muted;
                 let clip_widget = container(
@@ -1511,10 +1590,15 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                             } else {
                                 self.base_color
                             };
-                            let (muted_alpha, normal_alpha) = if clip_muted {
-                                (0.42, 0.42)
+                            let normal_alpha = if self.is_selected {
+                                CLIP_SELECTED_ALPHA
                             } else {
-                                (0.92, 0.92)
+                                CLIP_NORMAL_ALPHA
+                            };
+                            let muted_alpha = if clip_muted {
+                                CLIP_MUTED_ALPHA
+                            } else {
+                                normal_alpha
                             };
                             container::Style {
                                 background: Some(clip_two_edge_gradient(
