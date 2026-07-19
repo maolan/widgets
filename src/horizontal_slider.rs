@@ -293,6 +293,7 @@ where
                     state.is_dragging = true;
                     state.drag_start_x = cursor_position.x;
                     state.drag_start_value = self.value;
+                    shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))

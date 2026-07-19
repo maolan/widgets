@@ -4,6 +4,7 @@ mod consts;
 pub mod controller;
 pub mod curve_editor;
 pub mod drum;
+pub mod horizontal_meter;
 pub mod horizontal_scrollbar;
 pub mod horizontal_slider;
 pub mod menu;
