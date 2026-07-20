@@ -1,5 +1,5 @@
 use iced::{
-    Color, Event, Point, Rectangle, Renderer, Theme, mouse,
+    Color, Event, Point, Rectangle, Renderer, Size, Theme, mouse,
     widget::canvas::{Action as CanvasAction, Frame, Geometry, Path, Program, Stroke},
 };
 
@@ -216,28 +216,18 @@ impl<M: CurveEditorMessage> Program<M> for CurveEditor<M> {
 
         let mut frame = Frame::new(renderer, bounds.size());
 
-        if self.points.len() >= 2 {
-            let mut sorted = self.points.clone();
-            sorted.sort_unstable_by_key(|point| point.sample);
+        let mut sorted = self.points.clone();
+        sorted.sort_unstable_by_key(|point| point.sample);
 
-            let line = Path::new(|path| {
-                let first = self.point_position(sorted[0], bounds);
-                path.move_to(first);
-                for point in sorted.iter().skip(1) {
-                    path.line_to(self.point_position(*point, bounds));
-                }
-            });
-            frame.stroke(
-                &line,
-                Stroke::default()
-                    .with_color(self.color)
-                    .with_width(self.line_width),
+        let bar_width = self.line_width.max(1.0);
+        for point in &sorted {
+            let top = self.point_position(*point, bounds);
+            let rect = Path::rectangle(
+                Point::new(top.x - bar_width / 2.0, top.y),
+                Size::new(bar_width, (bounds.height - top.y).max(1.0)),
             );
-        }
-
-        for point in &self.points {
-            let center = self.point_position(*point, bounds);
-            let circle = Path::circle(center, self.dot_radius.max(0.0));
+            frame.fill(&rect, self.color);
+            let circle = Path::circle(top, self.dot_radius.max(0.0));
             frame.fill(&circle, self.color);
         }
 
