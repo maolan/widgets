@@ -28,6 +28,9 @@ pub enum PianoControllerLane {
     Rpn,
     Nrpn,
     SysEx,
+    MpePitchBend,
+    MpePressure,
+    MpeTimbre,
 }
 
 impl fmt::Display for PianoControllerLane {
@@ -38,6 +41,9 @@ impl fmt::Display for PianoControllerLane {
             Self::Rpn => write!(f, "RPN"),
             Self::Nrpn => write!(f, "NRPN"),
             Self::SysEx => write!(f, "SysEx"),
+            Self::MpePitchBend => write!(f, "MPE Pitch Bend"),
+            Self::MpePressure => write!(f, "MPE Pressure"),
+            Self::MpeTimbre => write!(f, "MPE Timbre"),
         }
     }
 }
@@ -88,6 +94,30 @@ pub const PIANO_NRPN_KIND_ALL: [PianoNrpnKind; 3] = [
     PianoNrpnKind::VibratoDepth,
 ];
 
+/// A single point in a per-note MPE expression curve. `sample_offset` is
+/// relative to the note's start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MpeExpressionPoint {
+    pub sample_offset: usize,
+    /// For pitch bend this is 0..=16383 (8192 center); for pressure and
+    /// timbre this is 0..=127.
+    pub value: u16,
+}
+
+/// One per-note MPE expression curve.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct MpeExpressionCurve {
+    pub points: Vec<MpeExpressionPoint>,
+}
+
+/// Per-note MPE expression data attached to a [`PianoNote`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct MpeNoteExpression {
+    pub pitch_bend: MpeExpressionCurve,
+    pub pressure: MpeExpressionCurve,
+    pub timbre: MpeExpressionCurve,
+}
+
 #[derive(Debug, Clone)]
 pub struct PianoNote {
     pub start_sample: usize,
@@ -95,6 +125,7 @@ pub struct PianoNote {
     pub pitch: u8,
     pub velocity: u8,
     pub channel: u8,
+    pub mpe: MpeNoteExpression,
 }
 
 #[derive(Debug, Clone)]

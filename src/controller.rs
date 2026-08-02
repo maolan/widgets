@@ -23,6 +23,9 @@ pub fn controller_lane_line_count(lane: PianoControllerLane) -> usize {
         PianoControllerLane::Rpn => PIANO_RPN_KIND_ALL.len(),
         PianoControllerLane::Nrpn => PIANO_NRPN_KIND_ALL.len(),
         PianoControllerLane::SysEx => 1,
+        PianoControllerLane::MpePitchBend
+        | PianoControllerLane::MpePressure
+        | PianoControllerLane::MpeTimbre => 128,
     }
 }
 
@@ -43,6 +46,9 @@ pub fn controller_row_for_lane(lane: PianoControllerLane, controller: u8) -> Opt
             _ => None,
         },
         PianoControllerLane::SysEx => None,
+        PianoControllerLane::MpePitchBend
+        | PianoControllerLane::MpePressure
+        | PianoControllerLane::MpeTimbre => None,
     }
 }
 
@@ -100,6 +106,9 @@ pub fn lane_controller_events(
             .collect(),
         PianoControllerLane::Velocity => vec![],
         PianoControllerLane::SysEx => vec![],
+        PianoControllerLane::MpePitchBend
+        | PianoControllerLane::MpePressure
+        | PianoControllerLane::MpeTimbre => vec![],
         PianoControllerLane::Rpn => {
             let mut ordered: Vec<usize> = (0..controllers.len()).collect();
             ordered.sort_unstable_by_key(|idx| (controllers[*idx].sample, *idx));
