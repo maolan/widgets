@@ -3,8 +3,9 @@ use iced::{
     Color, Event, Point, Rectangle, Renderer, Size, Theme, mouse,
     widget::canvas::{Action as CanvasAction, Frame, Geometry, Path, Program},
 };
+use std::collections::HashSet;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DrumMessage {
     NoteSelected(usize),
     ClearSelection,
@@ -46,6 +47,7 @@ pub struct DrumRollInteraction {
     pub drum_rows: Vec<u8>,
     pub row_height: f32,
     pub selecting_rect: Option<(Point, Point)>,
+    pub selected_notes: HashSet<usize>,
 }
 
 #[derive(Default, Debug)]
@@ -64,6 +66,7 @@ impl DrumRollInteraction {
         drum_rows: Vec<u8>,
         row_height: f32,
         selecting_rect: Option<(Point, Point)>,
+        selected_notes: HashSet<usize>,
     ) -> Self {
         Self {
             notes,
@@ -72,6 +75,7 @@ impl DrumRollInteraction {
             drum_rows,
             row_height,
             selecting_rect,
+            selected_notes,
         }
     }
 
@@ -246,26 +250,26 @@ impl Program<DrumMessage> for DrumRollInteraction {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        if let (Some(drag_start), Some(note_idx)) = (state.drag_start, state.drag_note_index)
-            && state.dragging_mode == DraggingMode::DraggingNote
-            && let Some(note) = self.notes.get(note_idx)
-            && let Some(row_idx) = self.drum_rows.iter().position(|&p| p == note.pitch)
+        if state.dragging_mode == DraggingMode::DraggingNote
+            && let (Some(drag_start), Some(cursor_pos)) =
+                (state.drag_start, cursor.position_in(bounds))
         {
-            let cursor_pos = if let Some(pos) = cursor.position_in(bounds) {
-                pos
-            } else {
-                return vec![frame.into_geometry()];
-            };
             let pps = (self.pixels_per_sample * self.zoom_x).max(0.0001);
             let delta_x = cursor_pos.x - drag_start.x;
-            let x = note.start_sample as f32 * pps + delta_x;
-            let y = row_idx as f32 * self.row_height + 1.0;
-            let w = (note.length_samples as f32 * pps).max(2.0);
-            let h = (self.row_height - 2.0).max(2.0);
-            frame.fill(
-                &Path::rectangle(Point::new(x, y), Size::new(w, h)),
-                Color::from_rgba(0.9, 0.9, 0.95, 0.35),
-            );
+            for &note_idx in &self.selected_notes {
+                if let Some(note) = self.notes.get(note_idx)
+                    && let Some(row_idx) = self.drum_rows.iter().position(|&p| p == note.pitch)
+                {
+                    let x = note.start_sample as f32 * pps + delta_x;
+                    let y = row_idx as f32 * self.row_height + 1.0;
+                    let w = (note.length_samples as f32 * pps).max(2.0);
+                    let h = (self.row_height - 2.0).max(2.0);
+                    frame.fill(
+                        &Path::rectangle(Point::new(x, y), Size::new(w, h)),
+                        Color::from_rgba(0.9, 0.9, 0.95, 0.35),
+                    );
+                }
+            }
         }
 
         if let Some(note_idx) = state.hover_note_index
@@ -322,5 +326,142 @@ impl Program<DrumMessage> for DrumRollInteraction {
         }
 
         vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::midi::PianoNote;
+    use iced::widget::canvas::Program;
+    use iced::{Event, Point, Rectangle, Size, event, mouse};
+    use std::collections::HashSet;
+
+    fn action_message(action: CanvasAction<DrumMessage>) -> (Option<DrumMessage>, event::Status) {
+        let (message, _redraw, status) = action.into_inner();
+        (message, status)
+    }
+
+    fn drum_note(start_sample: usize, pitch: u8) -> PianoNote {
+        PianoNote {
+            start_sample,
+            length_samples: 20,
+            pitch,
+            velocity: 100,
+            channel: 0,
+            mpe: Default::default(),
+        }
+    }
+
+    #[test]
+    fn drum_roll_click_on_note_selects_and_starts_drag() {
+        let interaction = DrumRollInteraction::new(
+            vec![drum_note(10, 38)],
+            1.0,
+            1.0,
+            vec![36, 38],
+            20.0,
+            None,
+            HashSet::new(),
+        );
+        let mut state = DrumRollInteractionState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(200.0, 100.0));
+        let cursor = mouse::Cursor::Available(Point::new(15.0, 22.0));
+
+        let action = interaction
+            .update(
+                &mut state,
+                &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                bounds,
+                cursor,
+            )
+            .expect("action");
+
+        let (message, status) = action_message(action);
+        assert_eq!(message, Some(DrumMessage::NoteSelected(0)));
+        assert_eq!(status, event::Status::Captured);
+        assert_eq!(state.dragging_mode, DraggingMode::DraggingNote);
+        assert_eq!(state.drag_note_index, Some(0));
+    }
+
+    #[test]
+    fn drum_roll_drag_release_publishes_move_with_delta() {
+        let interaction = DrumRollInteraction::new(
+            vec![drum_note(10, 38)],
+            1.0,
+            1.0,
+            vec![36, 38],
+            20.0,
+            None,
+            HashSet::new(),
+        );
+        let mut state = DrumRollInteractionState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(200.0, 100.0));
+        let press_cursor = mouse::Cursor::Available(Point::new(15.0, 22.0));
+        let release_cursor = mouse::Cursor::Available(Point::new(35.0, 22.0));
+
+        let _ = interaction.update(
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            press_cursor,
+        );
+
+        let action = interaction
+            .update(
+                &mut state,
+                &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                bounds,
+                release_cursor,
+            )
+            .expect("release action");
+
+        let (message, status) = action_message(action);
+        assert_eq!(
+            message,
+            Some(DrumMessage::NoteMove {
+                note_index: 0,
+                delta_samples: 20,
+            })
+        );
+        assert_eq!(status, event::Status::Captured);
+    }
+
+    #[test]
+    fn drum_roll_cursor_moved_while_dragging_requests_redraw() {
+        let interaction = DrumRollInteraction::new(
+            vec![drum_note(10, 38)],
+            1.0,
+            1.0,
+            vec![36, 38],
+            20.0,
+            None,
+            HashSet::new(),
+        );
+        let mut state = DrumRollInteractionState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(200.0, 100.0));
+        let press_cursor = mouse::Cursor::Available(Point::new(15.0, 22.0));
+        let drag_cursor = mouse::Cursor::Available(Point::new(35.0, 22.0));
+
+        let _ = interaction.update(
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            press_cursor,
+        );
+
+        let action = interaction
+            .update(
+                &mut state,
+                &Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(35.0, 22.0),
+                }),
+                bounds,
+                drag_cursor,
+            )
+            .expect("drag action");
+
+        let (message, _status) = action_message(action);
+        assert!(message.is_none());
     }
 }
