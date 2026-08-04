@@ -1,3 +1,4 @@
+use crate::audio::read_wav_f32;
 use crate::midi::{PITCH_MAX, PianoNote};
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Theme, gradient, mouse,
@@ -13,8 +14,6 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use wavers::Wav;
-
 pub type PeakPair = [f32; 2];
 pub type ClipPeaksData = Vec<Vec<PeakPair>>;
 pub type ClipPeaks = Arc<ClipPeaksData>;
@@ -408,7 +407,7 @@ impl WaveformCanvas {
     }
 
     fn source_column_peaks(
-        source_wav_path: &PathBuf,
+        source_wav_path: &std::path::Path,
         channel_count: usize,
         source_start_sample: usize,
         source_end_sample: usize,
@@ -417,10 +416,9 @@ impl WaveformCanvas {
         if total_columns == 0 || source_end_sample <= source_start_sample || channel_count == 0 {
             return None;
         }
-        let mut wav = Wav::<f32>::from_path(source_wav_path).ok()?;
-        let wav_channels = wav.n_channels().max(1) as usize;
+        let (samples, wav_channels, _sample_rate) = read_wav_f32(source_wav_path).ok()?;
         let use_channels = channel_count.min(wav_channels).max(1);
-        let total_frames = wav.n_samples() / wav_channels;
+        let total_frames = samples.len() / wav_channels;
         if source_start_sample >= total_frames {
             return None;
         }
@@ -430,12 +428,9 @@ impl WaveformCanvas {
             return None;
         }
 
-        wav.to_data().ok()?;
-        wav.seek_by_samples((source_start_sample.saturating_mul(wav_channels)) as u64)
-            .ok()?;
-        let chunk = wav
-            .read_samples(read_frames.saturating_mul(wav_channels))
-            .ok()?;
+        let start_sample = source_start_sample.saturating_mul(wav_channels);
+        let end_sample = read_end.saturating_mul(wav_channels);
+        let chunk = &samples[start_sample..end_sample];
         if chunk.is_empty() {
             return None;
         }

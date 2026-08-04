@@ -1,4 +1,5 @@
 pub mod arch_slider;
+pub mod audio;
 pub mod clip;
 mod consts;
 pub mod controller;

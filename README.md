@@ -131,7 +131,7 @@ The crate currently depends on:
 
 - `iced` for widget, canvas, and event handling infrastructure.
 - `iced_fonts` for icon glyphs used by the numeric spinner.
-- `wavers` for reading waveform data used by audio clip previews.
+- `symphonia` for reading waveform data used by audio clip previews.
 
 ## Development
 
