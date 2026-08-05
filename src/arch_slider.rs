@@ -36,6 +36,7 @@ pub struct ArchSlider<'a, Message> {
     filled_color: Color,
     handle_color: Color,
     on_release: Option<Message>,
+    on_right_click: Option<Message>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +72,7 @@ impl<'a, Message> ArchSlider<'a, Message> {
                 0xFF as f32 / 255.0,
             ),
             on_release: None,
+            on_right_click: None,
         }
     }
 
@@ -111,6 +113,11 @@ impl<'a, Message> ArchSlider<'a, Message> {
 
     pub fn on_release(mut self, message: Message) -> Self {
         self.on_release = Some(message);
+        self
+    }
+
+    pub fn on_right_click(mut self, message: Message) -> Self {
+        self.on_right_click = Some(message);
         self
     }
 }
@@ -323,6 +330,14 @@ where
                     state.is_dragging = true;
                     state.drag_start_y = cursor_position.y;
                     state.drag_start_value = self.value;
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                if !cursor.is_over(bounds) {
+                    return;
+                }
+                if let Some(message) = self.on_right_click.as_ref() {
+                    shell.publish(message.clone());
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -560,5 +575,35 @@ mod tests {
         );
 
         assert_eq!(messages, vec![99.0]);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn update_right_click_publishes_message_when_cursor_over_bounds() {
+        let mut slider = ArchSlider::new(-1.0..=1.0, 0.0, |value| value)
+            .width(Length::Fixed(100.0))
+            .on_right_click(77.0);
+        let mut tree = test_tree_with_state(State::default());
+        let node = layout::Node::new(Size::new(100.0, 100.0));
+        let layout = Layout::new(&node);
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        let renderer = ();
+        let mut clipboard = clipboard::Null;
+        let viewport = Rectangle::new(Point::ORIGIN, Size::new(100.0, 100.0));
+
+        <ArchSlider<'_, f32> as Widget<f32, iced::Theme, ()>>::update(
+            &mut slider,
+            &mut tree,
+            &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+            layout,
+            mouse::Cursor::Available(Point::new(50.0, 50.0)),
+            &renderer,
+            &mut clipboard,
+            &mut shell,
+            &viewport,
+        );
+
+        assert_eq!(messages, vec![77.0]);
     }
 }
