@@ -19,6 +19,7 @@ pub enum DrumMessage {
     NoteMove {
         note_index: usize,
         delta_samples: i64,
+        target_pitch: u8,
     },
     AdjustVelocity {
         note_index: usize,
@@ -223,16 +224,22 @@ impl Program<DrumMessage> for DrumRollInteraction {
                         if let (Some(drag_start), Some(note_idx)) =
                             (state.drag_start.take(), state.drag_note_index.take())
                         {
-                            state.drag_current = None;
+                            let drag_current = state.drag_current.take();
                             state.dragging_mode = DraggingMode::None;
-                            if let Some(position) = cursor.position_in(bounds) {
+                            let position = cursor
+                                .position_in(bounds)
+                                .or(drag_current)
+                                .unwrap_or(drag_start);
+                            if let Some(original_note) = notes.get(note_idx) {
                                 let delta_x = position.x - drag_start.x;
                                 let delta_samples = (delta_x / pps) as i64;
-                                if delta_samples != 0 {
+                                let target_pitch = self.pitch_at_y(position.y);
+                                if delta_samples != 0 || target_pitch != original_note.pitch {
                                     return Some(
                                         CanvasAction::publish(DrumMessage::NoteMove {
                                             note_index: note_idx,
                                             delta_samples,
+                                            target_pitch,
                                         })
                                         .and_capture(),
                                     );
@@ -318,12 +325,25 @@ impl Program<DrumMessage> for DrumRollInteraction {
         {
             let pps = (self.pixels_per_sample * self.zoom_x).max(0.0001);
             let delta_x = cursor_pos.x - drag_start.x;
+            let row_delta = self
+                .note_at_position(drag_start, pps, &self.notes)
+                .and_then(|idx| self.notes.get(idx))
+                .and_then(|note| {
+                    let start_row = self.drum_rows.iter().position(|&p| p == note.pitch)?;
+                    let target_pitch = self.pitch_at_y(cursor_pos.y);
+                    let target_row = self.drum_rows.iter().position(|&p| p == target_pitch)?;
+                    Some(target_row as isize - start_row as isize)
+                })
+                .unwrap_or(0);
             for &note_idx in &self.selected_notes {
                 if let Some(note) = self.notes.get(note_idx)
                     && let Some(row_idx) = self.drum_rows.iter().position(|&p| p == note.pitch)
                 {
                     let x = note.start_sample as f32 * pps + delta_x;
-                    let y = row_idx as f32 * self.row_height + 1.0;
+                    let target_row = (row_idx as isize + row_delta)
+                        .clamp(0, self.drum_rows.len().saturating_sub(1) as isize)
+                        as usize;
+                    let y = target_row as f32 * self.row_height + 1.0;
                     let w = (note.length_samples as f32 * pps).max(2.0);
                     let h = (self.row_height - 2.0).max(2.0);
                     frame.fill(
@@ -354,23 +374,6 @@ impl Program<DrumMessage> for DrumRollInteraction {
                 &path,
                 iced::widget::canvas::Stroke::default()
                     .with_color(Color::from_rgba(0.5, 0.75, 1.0, 0.9))
-                    .with_width(1.5),
-            );
-        }
-
-        if let Some(note_idx) = state.hover_note_index
-            && let Some(note) = self.notes.get(note_idx)
-            && let Some(row_idx) = self.drum_rows.iter().position(|&p| p == note.pitch)
-        {
-            let pps = (self.pixels_per_sample * self.zoom_x).max(0.0001);
-            let x = note.start_sample as f32 * pps;
-            let y = row_idx as f32 * self.row_height + 1.0;
-            let w = (note.length_samples as f32 * pps).max(2.0);
-            let h = (self.row_height - 2.0).max(2.0);
-            frame.stroke(
-                &Path::rectangle(Point::new(x, y), Size::new(w, h)),
-                iced::widget::canvas::Stroke::default()
-                    .with_color(Color::from_rgba(1.0, 1.0, 1.0, 0.6))
                     .with_width(1.5),
             );
         }
@@ -508,6 +511,51 @@ mod tests {
             Some(DrumMessage::NoteMove {
                 note_index: 0,
                 delta_samples: 20,
+                target_pitch: 38,
+            })
+        );
+        assert_eq!(status, event::Status::Captured);
+    }
+
+    #[test]
+    fn drum_roll_vertical_drag_release_publishes_target_pitch() {
+        let interaction = DrumRollInteraction::new(
+            vec![drum_note(10, 38)],
+            1.0,
+            1.0,
+            vec![36, 38],
+            20.0,
+            None,
+            HashSet::new(),
+        );
+        let mut state = DrumRollInteractionState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(200.0, 100.0));
+        let press_cursor = mouse::Cursor::Available(Point::new(15.0, 22.0));
+        let release_cursor = mouse::Cursor::Available(Point::new(15.0, 2.0));
+
+        let _ = interaction.update(
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            press_cursor,
+        );
+
+        let action = interaction
+            .update(
+                &mut state,
+                &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                bounds,
+                release_cursor,
+            )
+            .expect("release action");
+
+        let (message, status) = action_message(action);
+        assert_eq!(
+            message,
+            Some(DrumMessage::NoteMove {
+                note_index: 0,
+                delta_samples: 0,
+                target_pitch: 36,
             })
         );
         assert_eq!(status, event::Status::Captured);
