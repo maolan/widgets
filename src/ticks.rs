@@ -79,13 +79,18 @@ impl TicksCanvas {
         fader_height * (1.0 - normalized)
     }
 
-    fn tick_layout(&self) -> Vec<(f32, String)> {
+    fn tick_layout(&self) -> Vec<(f32, f32, String)> {
         self.tick_values()
             .into_iter()
             .map(|value| {
-                let y = self.value_to_y(value).clamp(0.0, self.height - 1.0);
-                let label_y = (y - 4.0).clamp(0.0, (self.height - 10.0).max(0.0));
-                (label_y, Self::format_tick_label(value))
+                let tick_y = self.value_to_y(value).clamp(0.0, self.height - 1.0);
+                let label_y = (tick_y - 4.0).clamp(0.0, (self.height - 10.0).max(0.0));
+                let adjusted_tick_y = if (tick_y - label_y - 4.0).abs() > 0.0001 {
+                    label_y + 4.0
+                } else {
+                    tick_y
+                };
+                (adjusted_tick_y, label_y, Self::format_tick_label(value))
             })
             .collect()
     }
@@ -205,24 +210,29 @@ impl<Message> canvas::Program<Message> for TicksCanvas {
         }
 
         let static_geometry = state.cache.draw(renderer, bounds.size(), |frame| {
-            let effective_height = (bounds.height - (OUTER_PAD_Y * 2.0)).max(1.0);
+            let (origin_y, effective_height) = match self.spec {
+                TickSpec::Range(_) => (0.0, bounds.height.max(1.0)),
+                TickSpec::Custom(_, _) => {
+                    (OUTER_PAD_Y, (bounds.height - (OUTER_PAD_Y * 2.0)).max(1.0))
+                }
+            };
             let layout = Self {
                 spec: self.spec.clone(),
                 height: effective_height,
             }
             .tick_layout();
             let tick_x = SCALE_GAP;
-            for (label_y, label) in layout {
+            for (tick_y, label_y, label) in layout {
                 frame.fill(
                     &Path::rectangle(
-                        Point::new(tick_x, OUTER_PAD_Y + label_y + 4.0),
+                        Point::new(tick_x, origin_y + tick_y),
                         iced::Size::new(4.0, 1.0),
                     ),
                     Color::from_rgba(0.62, 0.67, 0.77, 0.78),
                 );
                 frame.fill_text(Text {
                     content: label,
-                    position: Point::new(tick_x + 6.0, OUTER_PAD_Y + label_y),
+                    position: Point::new(tick_x + 6.0, origin_y + label_y),
                     color: Color::from_rgba(0.9, 0.92, 0.96, 0.9),
                     size: 8.0.into(),
                     ..Default::default()
@@ -342,9 +352,11 @@ mod tests {
         };
         let layout = canvas.tick_layout();
 
-        for (y, _) in layout {
-            assert!(y >= 0.0);
-            assert!(y <= (height - 10.0).max(0.0));
+        for (tick_y, label_y, _) in layout {
+            assert!(tick_y >= 0.0);
+            assert!(tick_y <= height - 1.0);
+            assert!(label_y >= 0.0);
+            assert!(label_y <= (height - 10.0).max(0.0));
         }
     }
 
