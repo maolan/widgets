@@ -82,6 +82,150 @@ const BLACK_KEY_DEPTH_RATIO: f32 = 0.6;
 /// Ratio of a white key's length that a black key occupies along the note axis.
 const BLACK_KEY_LENGTH_RATIO: f32 = 0.6;
 
+fn velocity_from_v(v: f32, depth: f32) -> u8 {
+    let normalized = (v / depth).clamp(0.0, 1.0);
+    (normalized * 126.0).round() as u8 + 1
+}
+
+/// Hit-test a point inside a keyboard range drawn by `draw_keyboard_range_into`.
+///
+/// `cursor` and `bounds` must be in the same canvas coordinate space. The returned
+/// tuple is `(note_class, velocity)` where `note_class` is the MIDI note class
+/// within the octave (0..11) and `velocity` is in the range 1..=127.
+pub fn note_at_in_range(
+    cursor: Point,
+    bounds: Rectangle,
+    orientation: Orientation,
+    note_count: u8,
+) -> Option<(u8, u8)> {
+    if note_count == 0 {
+        return None;
+    }
+    if orientation == Orientation::Degree270 {
+        return note_at_in_range_degree270(cursor, bounds, note_count);
+    }
+    let natural_cursor = to_natural_cursor(orientation, bounds, cursor);
+    let natural = natural_bounds(orientation, bounds);
+    let height = natural.height;
+    let width = natural.width;
+    let white_notes: &[u8] = if note_count >= 12 {
+        &[0, 2, 4, 5, 7, 9, 11]
+    } else {
+        &[0, 2, 4, 5, 7]
+    };
+    let white_key_count = white_notes.iter().take_while(|&n| *n < note_count).count() as f32;
+    if white_key_count == 0.0 {
+        return None;
+    }
+    let white_key_size = height / white_key_count;
+    let black_key_width = width * BLACK_KEY_DEPTH_RATIO;
+    let black_key_length = white_key_size * BLACK_KEY_LENGTH_RATIO;
+    let u = natural_cursor.x.clamp(0.0, height);
+    let v = natural_cursor.y;
+
+    let (black_offsets, black_notes): (&[u8], &[u8]) = if note_count >= 12 {
+        (&[1, 2, 4, 5, 6], &[1, 3, 6, 8, 10])
+    } else {
+        (&[1, 2, 4], &[1, 3, 6])
+    };
+
+    if v <= black_key_width {
+        for (idx, &note_id) in black_notes
+            .iter()
+            .enumerate()
+            .take_while(|&(_, n)| *n < note_count)
+        {
+            let center = black_offsets[idx] as f32 * white_key_size;
+            if (u - center).abs() <= black_key_length * 0.5 {
+                let velocity = velocity_from_v(v, black_key_width);
+                return Some((note_id, velocity));
+            }
+        }
+    }
+
+    let index = (u / white_key_size)
+        .clamp(0.0, white_key_count - 1.0)
+        .floor() as usize;
+    let note_id = white_notes.get(index).copied()?;
+    let velocity = velocity_from_v(v, width);
+    Some((note_id, velocity))
+}
+
+fn note_at_in_range_degree270(
+    cursor: Point,
+    bounds: Rectangle,
+    note_count: u8,
+) -> Option<(u8, u8)> {
+    if note_count < NOTES_PER_OCTAVE as u8 {
+        let white_note_ids = [0_u8, 2, 4, 5, 7];
+        let black_key_offsets = [1_u8, 2, 4];
+        let black_note_ids = [1_u8, 3, 6];
+        let white_key_height = bounds.height / white_note_ids.len() as f32;
+        let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
+        let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
+
+        if cursor.x <= black_key_width {
+            for (idx, offset) in black_key_offsets.iter().enumerate() {
+                let note_id = black_note_ids[idx];
+                if note_id >= note_count {
+                    continue;
+                }
+                let y_pos_black = bounds.height
+                    - (f32::from(*offset) * white_key_height)
+                    - (black_key_height * 0.5);
+                if cursor.y >= y_pos_black && cursor.y <= y_pos_black + black_key_height {
+                    let velocity = velocity_from_v(cursor.x, black_key_width);
+                    return Some((note_id, velocity));
+                }
+            }
+        }
+
+        for (i, note_id) in white_note_ids.iter().enumerate() {
+            let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
+            if cursor.y >= y_pos && cursor.y <= y_pos + white_key_height {
+                let velocity = velocity_from_v(cursor.x, bounds.width);
+                return Some((*note_id, velocity));
+            }
+        }
+        return None;
+    }
+    let white_key_height = bounds.height / 7.0;
+    let black_key_offsets = [1, 2, 4, 5, 6];
+    let black_note_ids = [1, 3, 6, 8, 10];
+    let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
+    let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
+
+    if cursor.x <= black_key_width {
+        for (idx, offset) in black_key_offsets.iter().enumerate() {
+            let y_pos_black =
+                bounds.height - (*offset as f32 * white_key_height) - (black_key_height * 0.5);
+            if cursor.y >= y_pos_black && cursor.y <= y_pos_black + black_key_height {
+                let velocity = velocity_from_v(cursor.x, black_key_width);
+                return Some((black_note_ids[idx], velocity));
+            }
+        }
+    }
+
+    for i in 0..7 {
+        let note_id = match i {
+            0 => 0,
+            1 => 2,
+            2 => 4,
+            3 => 5,
+            4 => 7,
+            5 => 9,
+            6 => 11,
+            _ => 0,
+        };
+        let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
+        if cursor.y >= y_pos && cursor.y <= y_pos + white_key_height {
+            let velocity = velocity_from_v(cursor.x, bounds.width);
+            return Some((note_id, velocity));
+        }
+    }
+    None
+}
+
 /// Map a point from the keyboard's natural coordinate system to canvas space.
 ///
 /// In the natural coordinate system `u` runs along the note axis from the
@@ -531,7 +675,7 @@ pub fn draw_partial_octave(
 #[derive(Debug, Clone)]
 pub struct OctaveKeyboard<Message, Press, Release>
 where
-    Press: Fn(u8) -> Message + Clone,
+    Press: Fn(u8, u8) -> Message + Clone,
     Release: Fn(u8) -> Message + Clone,
 {
     pub octave: u8,
@@ -545,7 +689,7 @@ where
 
 impl<Message, Press, Release> OctaveKeyboard<Message, Press, Release>
 where
-    Press: Fn(u8) -> Message + Clone,
+    Press: Fn(u8, u8) -> Message + Clone,
     Release: Fn(u8) -> Message + Clone,
 {
     pub fn new(
@@ -569,125 +713,8 @@ where
         self
     }
 
-    fn note_class_at(&self, cursor: Point, bounds: Rectangle) -> Option<u8> {
-        if self.note_count == 0 {
-            return None;
-        }
-        if self.orientation == Orientation::Degree270 {
-            return self.note_class_at_degree270(cursor, bounds);
-        }
-        let natural_cursor = to_natural_cursor(self.orientation, bounds, cursor);
-        let natural = natural_bounds(self.orientation, bounds);
-        let height = natural.height;
-        let width = natural.width;
-        let white_notes: &[u8] = if self.note_count >= 12 {
-            &[0, 2, 4, 5, 7, 9, 11]
-        } else {
-            &[0, 2, 4, 5, 7]
-        };
-        let white_key_count = white_notes
-            .iter()
-            .take_while(|&n| *n < self.note_count)
-            .count() as f32;
-        if white_key_count == 0.0 {
-            return None;
-        }
-        let white_key_size = height / white_key_count;
-        let black_key_width = width * BLACK_KEY_DEPTH_RATIO;
-        let black_key_length = white_key_size * BLACK_KEY_LENGTH_RATIO;
-        let u = natural_cursor.x.clamp(0.0, height);
-        let v = natural_cursor.y;
-
-        let (black_offsets, black_notes): (&[u8], &[u8]) = if self.note_count >= 12 {
-            (&[1, 2, 4, 5, 6], &[1, 3, 6, 8, 10])
-        } else {
-            (&[1, 2, 4], &[1, 3, 6])
-        };
-
-        if v <= black_key_width {
-            for (idx, &note_id) in black_notes
-                .iter()
-                .enumerate()
-                .take_while(|&(_, n)| *n < self.note_count)
-            {
-                let center = black_offsets[idx] as f32 * white_key_size;
-                if (u - center).abs() <= black_key_length * 0.5 {
-                    return Some(note_id);
-                }
-            }
-        }
-
-        let index = (u / white_key_size)
-            .clamp(0.0, white_key_count - 1.0)
-            .floor() as usize;
-        white_notes.get(index).copied()
-    }
-
-    fn note_class_at_degree270(&self, cursor: Point, bounds: Rectangle) -> Option<u8> {
-        if self.note_count < NOTES_PER_OCTAVE as u8 {
-            let white_note_ids = [0_u8, 2, 4, 5, 7];
-            let black_key_offsets = [1_u8, 2, 4];
-            let black_note_ids = [1_u8, 3, 6];
-            let white_key_height = bounds.height / white_note_ids.len() as f32;
-            let black_key_width = bounds.width * 0.6;
-            let black_key_height = white_key_height * 0.6;
-
-            if cursor.x <= black_key_width {
-                for (idx, offset) in black_key_offsets.iter().enumerate() {
-                    let note_id = black_note_ids[idx];
-                    if note_id >= self.note_count {
-                        continue;
-                    }
-                    let y_pos_black = bounds.height
-                        - (f32::from(*offset) * white_key_height)
-                        - (black_key_height * 0.5);
-                    if cursor.y >= y_pos_black && cursor.y <= y_pos_black + black_key_height {
-                        return Some(note_id);
-                    }
-                }
-            }
-
-            for (i, note_id) in white_note_ids.iter().enumerate() {
-                let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
-                if cursor.y >= y_pos && cursor.y <= y_pos + white_key_height {
-                    return Some(*note_id);
-                }
-            }
-            return None;
-        }
-        let white_key_height = bounds.height / 7.0;
-        let black_key_offsets = [1, 2, 4, 5, 6];
-        let black_note_ids = [1, 3, 6, 8, 10];
-        let black_key_width = bounds.width * 0.6;
-        let black_key_height = white_key_height * 0.6;
-
-        if cursor.x <= black_key_width {
-            for (idx, offset) in black_key_offsets.iter().enumerate() {
-                let y_pos_black =
-                    bounds.height - (*offset as f32 * white_key_height) - (black_key_height * 0.5);
-                if cursor.y >= y_pos_black && cursor.y <= y_pos_black + black_key_height {
-                    return Some(black_note_ids[idx]);
-                }
-            }
-        }
-
-        for i in 0..7 {
-            let note_id = match i {
-                0 => 0,
-                1 => 2,
-                2 => 4,
-                3 => 5,
-                4 => 7,
-                5 => 9,
-                6 => 11,
-                _ => 0,
-            };
-            let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
-            if cursor.y >= y_pos && cursor.y <= y_pos + white_key_height {
-                return Some(note_id);
-            }
-        }
-        None
+    fn note_at(&self, cursor: Point, bounds: Rectangle) -> Option<(u8, u8)> {
+        note_at_in_range(cursor, bounds, self.orientation, self.note_count)
     }
 
     fn midi_note(&self, note_class: u8) -> u8 {
@@ -704,7 +731,7 @@ pub struct OctaveKeyboardState {
 impl<Message, Press, Release> Program<Message> for OctaveKeyboard<Message, Press, Release>
 where
     Message: 'static,
-    Press: Fn(u8) -> Message + Clone,
+    Press: Fn(u8, u8) -> Message + Clone,
     Release: Fn(u8) -> Message + Clone,
 {
     type State = OctaveKeyboardState;
@@ -719,14 +746,17 @@ where
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position_in(bounds)
-                    && let Some(note_class) = self.note_class_at(position, bounds)
+                    && let Some((note_class, velocity)) = self.note_at(position, bounds)
                 {
                     state.active_note_class = Some(note_class);
                     state.pressed_notes.clear();
                     state.pressed_notes.insert(note_class);
                     return Some(
-                        CanvasAction::publish((self.on_press.clone())(self.midi_note(note_class)))
-                            .and_capture(),
+                        CanvasAction::publish((self.on_press.clone())(
+                            self.midi_note(note_class),
+                            velocity,
+                        ))
+                        .and_capture(),
                     );
                 }
             }
@@ -785,7 +815,7 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum TestMessage {
-        Pressed(u8),
+        Pressed(u8, u8),
         Released(u8),
     }
 
@@ -817,7 +847,7 @@ mod tests {
             )
             .expect("press action");
         let (message, status) = action_message(press);
-        assert_eq!(message, Some(TestMessage::Pressed(48)));
+        assert_eq!(message, Some(TestMessage::Pressed(48, 96)));
         assert_eq!(status, event::Status::Captured);
         assert_eq!(state.active_note_class, Some(0));
         assert!(state.pressed_notes.contains(&0));
@@ -859,7 +889,7 @@ mod tests {
             .expect("press action");
         let (message, status) = action_message(press);
 
-        assert_eq!(message, Some(TestMessage::Pressed(127)));
+        assert_eq!(message, Some(TestMessage::Pressed(127, 96)));
         assert_eq!(status, event::Status::Captured);
         assert_eq!(state.active_note_class, Some(7));
     }

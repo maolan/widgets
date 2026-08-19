@@ -13,6 +13,8 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 iced = { version = "0.14.0", features = ["advanced", "canvas", "image", "lazy", "tokio"] }
+iced_aw = "0.14.1"
+iced_drop = { version = "0.2.16", features = ["helpers"] }
 iced_fonts = { version = "0.3.0", features = ["lucide"] }
 serde = { version = "1.0.229", features = ["derive"] }
 symphonia = { version = "0.5.4", features = ["wav"] }
