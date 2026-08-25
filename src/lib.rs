@@ -1,5 +1,6 @@
 pub mod arch_slider;
 pub mod audio;
+pub mod audio_setup;
 pub mod clip;
 mod consts;
 pub mod controller;
@@ -18,6 +19,7 @@ pub mod piano_roll;
 pub mod slider;
 pub mod ticks;
 pub mod vertical_scrollbar;
+pub mod waveform;
 
 pub use iced;
 pub use iced_aw;

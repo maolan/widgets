@@ -9,6 +9,13 @@ use iced::mouse;
 use iced::{Border, Color, Element, Event, Length, Rectangle, Size};
 use std::time::Instant;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Orientation {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
 pub struct Slider<'a, Message> {
     range: std::ops::RangeInclusive<f32>,
     value: f32,
@@ -19,6 +26,7 @@ pub struct Slider<'a, Message> {
     step: Option<f32>,
     double_click_reset: f32,
     on_release: Option<Message>,
+    orientation: Orientation,
 }
 
 impl<'a, Message> Slider<'a, Message> {
@@ -36,6 +44,7 @@ impl<'a, Message> Slider<'a, Message> {
             step: None,
             double_click_reset: 0.0,
             on_release: None,
+            orientation: Orientation::Vertical,
         }
     }
 
@@ -63,6 +72,11 @@ impl<'a, Message> Slider<'a, Message> {
         self.on_release = Some(message);
         self
     }
+
+    pub fn horizontal(mut self) -> Self {
+        self.orientation = Orientation::Horizontal;
+        self
+    }
 }
 
 pub fn slider<'a, Message, F>(
@@ -80,6 +94,7 @@ where
 struct State {
     is_dragging: bool,
     last_click_at: Option<Instant>,
+    drag_start_x: f32,
     drag_start_y: f32,
     drag_start_value: f32,
 }
@@ -124,12 +139,8 @@ where
         let bounds = layout.bounds();
         let border_width = 1.0;
         let twice_border = border_width * 2.0;
-        let value_bounds_y = bounds.y + (self.handle_height / 2.0);
-        let value_bounds_height = bounds.height - self.handle_height;
         let normalized =
             (self.value - self.range.start()) / (self.range.end() - self.range.start());
-        let handle_offset =
-            (value_bounds_y + (value_bounds_height - twice_border) * (1.0 - normalized)).round();
 
         let back_color = Color::from_rgb(
             0x42 as f32 / 255.0,
@@ -173,46 +184,103 @@ where
             back_color,
         );
 
-        let filled_y_start = handle_offset + self.handle_height + handle_filled_gap;
-        let filled_height = bounds.y + bounds.height - filled_y_start;
+        match self.orientation {
+            Orientation::Vertical => {
+                let value_bounds_y = bounds.y + (self.handle_height / 2.0);
+                let value_bounds_height = bounds.height - self.handle_height;
+                let handle_offset = (value_bounds_y
+                    + (value_bounds_height - twice_border) * (1.0 - normalized))
+                    .round();
 
-        if filled_height > 0.0 {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x,
-                        y: filled_y_start,
-                        width: bounds.width,
-                        height: filled_height,
+                let filled_y_start = handle_offset + self.handle_height + handle_filled_gap;
+                let filled_height = bounds.y + bounds.height - filled_y_start;
+
+                if filled_height > 0.0 {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: bounds.x,
+                                y: filled_y_start,
+                                width: bounds.width,
+                                height: filled_height,
+                            },
+                            border: Border {
+                                radius: border_radius.into(),
+                                width: border_width,
+                                color: Color::TRANSPARENT,
+                            },
+                            ..Default::default()
+                        },
+                        filled_color,
+                    );
+                }
+
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle {
+                            x: bounds.x,
+                            y: handle_offset,
+                            width: bounds.width,
+                            height: self.handle_height + twice_border,
+                        },
+                        border: Border {
+                            radius: border_radius.into(),
+                            width: border_width,
+                            color: Color::TRANSPARENT,
+                        },
+                        ..Default::default()
                     },
-                    border: Border {
-                        radius: border_radius.into(),
-                        width: border_width,
-                        color: Color::TRANSPARENT,
+                    handle_color,
+                );
+            }
+            Orientation::Horizontal => {
+                let value_bounds_x = bounds.x + (self.handle_height / 2.0);
+                let value_bounds_width = bounds.width - self.handle_height;
+                let handle_offset =
+                    (value_bounds_x + (value_bounds_width - twice_border) * normalized).round();
+
+                let filled_x_end = handle_offset - handle_filled_gap;
+                let filled_width = filled_x_end - bounds.x;
+
+                if filled_width > 0.0 {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: bounds.x,
+                                y: bounds.y,
+                                width: filled_width,
+                                height: bounds.height,
+                            },
+                            border: Border {
+                                radius: border_radius.into(),
+                                width: border_width,
+                                color: Color::TRANSPARENT,
+                            },
+                            ..Default::default()
+                        },
+                        filled_color,
+                    );
+                }
+
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle {
+                            x: handle_offset - self.handle_height / 2.0 - border_width,
+                            y: bounds.y,
+                            width: self.handle_height + twice_border,
+                            height: bounds.height,
+                        },
+                        border: Border {
+                            radius: border_radius.into(),
+                            width: border_width,
+                            color: Color::TRANSPARENT,
+                        },
+                        ..Default::default()
                     },
-                    ..Default::default()
-                },
-                filled_color,
-            );
+                    handle_color,
+                );
+            }
         }
-
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: bounds.x,
-                    y: handle_offset,
-                    width: bounds.width,
-                    height: self.handle_height + twice_border,
-                },
-                border: Border {
-                    radius: border_radius.into(),
-                    width: border_width,
-                    color: Color::TRANSPARENT,
-                },
-                ..Default::default()
-            },
-            handle_color,
-        );
     }
 
     fn tag(&self) -> widget::tree::Tag {
@@ -254,6 +322,7 @@ where
                     shell.publish((self.on_change)(default_value));
                     shell.capture_event();
                 } else if let Some(cursor_position) = cursor.position() {
+                    state.drag_start_x = cursor_position.x;
                     state.drag_start_y = cursor_position.y;
                     state.drag_start_value = self.value;
                 }
@@ -270,9 +339,17 @@ where
                 if state.is_dragging
                     && let Some(cursor_position) = cursor.position()
                 {
-                    let delta_y = state.drag_start_y - cursor_position.y;
                     let range_size = self.range.end() - self.range.start();
-                    let value_change = (delta_y / bounds.height.max(1.0)) * range_size;
+                    let value_change = match self.orientation {
+                        Orientation::Vertical => {
+                            let delta_y = state.drag_start_y - cursor_position.y;
+                            (delta_y / bounds.height.max(1.0)) * range_size
+                        }
+                        Orientation::Horizontal => {
+                            let delta_x = cursor_position.x - state.drag_start_x;
+                            (delta_x / bounds.width.max(1.0)) * range_size
+                        }
+                    };
                     let raw_value = state.drag_start_value + value_change;
                     let new_value = self.clamp_to_step(raw_value);
                     shell.publish((self.on_change)(new_value));

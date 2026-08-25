@@ -4,6 +4,8 @@ use iced::{
 };
 use iced_fonts::lucide::{chevron_right, square, square_check_big};
 
+pub use iced_aw::{menu_bar, menu_items};
+
 pub fn base_button<'a, Message>(
     content: impl Into<Element<'a, Message>>,
     msg: Message,
@@ -25,9 +27,9 @@ where
             match status {
                 Status::Active => base.with_background(Color::TRANSPARENT),
                 Status::Hovered => base.with_background(Color::from_rgb(
-                    palette.primary.weak.color.r * 1.2,
-                    palette.primary.weak.color.g * 1.2,
-                    palette.primary.weak.color.b * 1.2,
+                    (palette.primary.weak.color.r * 1.2).min(1.0),
+                    (palette.primary.weak.color.g * 1.2).min(1.0),
+                    (palette.primary.weak.color.b * 1.2).min(1.0),
                 )),
                 Status::Disabled => base.with_background(Color::from_rgb(0.5, 0.5, 0.5)),
                 Status::Pressed => base.with_background(palette.primary.weak.color),
