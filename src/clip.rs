@@ -33,6 +33,7 @@ pub struct AudioClipData {
     pub length: usize,
     pub offset: usize,
     pub muted: bool,
+    pub reversed: bool,
     pub max_length_samples: usize,
     pub source_length_samples: usize,
     pub peaks: ClipPeaks,
@@ -57,6 +58,7 @@ pub struct MIDIClipData {
     pub offset: usize,
     pub input_channel: usize,
     pub muted: bool,
+    pub reversed: bool,
     pub max_length_samples: usize,
     pub grouped_clips: Vec<MIDIClipData>,
 }
@@ -361,6 +363,7 @@ struct WaveformCanvas {
     max_length: usize,
     source_length: usize,
     stretch_ratio: f32,
+    reversed: bool,
 }
 
 impl WaveformCanvas {
@@ -373,6 +376,7 @@ impl WaveformCanvas {
         self.max_length.hash(&mut hasher);
         self.source_length.hash(&mut hasher);
         self.stretch_ratio.to_bits().hash(&mut hasher);
+        self.reversed.hash(&mut hasher);
         self.peaks.len().hash(&mut hasher);
         for channel in self.peaks.iter() {
             channel.len().hash(&mut hasher);
@@ -612,10 +616,16 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                                         .copied()
                                         .unwrap_or([0.0, 0.0])
                                 } else {
+                                    let visual_col = if self.reversed {
+                                        draw_columns.saturating_sub(col + 1)
+                                    } else {
+                                        col
+                                    };
                                     let src_start = render_start_idx
-                                        + ((col * render_bins) / draw_columns).min(render_bins);
+                                        + ((visual_col * render_bins) / draw_columns)
+                                            .min(render_bins);
                                     let mut src_end = render_start_idx
-                                        + (((col + 1) * render_bins) / draw_columns)
+                                        + (((visual_col + 1) * render_bins) / draw_columns)
                                             .min(render_bins);
                                     if src_end <= src_start {
                                         src_end = (src_start + 1).min(total_peaks);
@@ -654,18 +664,24 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                     }
 
                     for col in 0..draw_columns {
+                        let visual_col = if self.reversed {
+                            draw_columns.saturating_sub(col + 1)
+                        } else {
+                            col
+                        };
                         let (min_val, max_val) = if let Some(columns) = source_columns.as_ref() {
                             let pair = columns
                                 .get(channel_idx)
-                                .and_then(|ch| ch.get(col))
+                                .and_then(|ch| ch.get(visual_col))
                                 .copied()
                                 .unwrap_or([0.0, 0.0]);
                             (pair[0], pair[1])
                         } else {
                             let src_start = render_start_idx
-                                + ((col * render_bins) / total_columns).min(render_bins);
+                                + ((visual_col * render_bins) / total_columns).min(render_bins);
                             let mut src_end = render_start_idx
-                                + (((col + 1) * render_bins) / total_columns).min(render_bins);
+                                + (((visual_col + 1) * render_bins) / total_columns)
+                                    .min(render_bins);
                             if src_end <= src_start {
                                 src_end = (src_start + 1).min(total_peaks);
                             }
@@ -760,6 +776,7 @@ struct MidiClipNotesCanvas {
     notes: Arc<Vec<PianoNote>>,
     clip_offset_samples: usize,
     clip_visible_length_samples: usize,
+    reversed: bool,
 }
 
 impl MidiClipNotesCanvas {
@@ -769,6 +786,7 @@ impl MidiClipNotesCanvas {
         bounds.height.to_bits().hash(&mut hasher);
         self.clip_offset_samples.hash(&mut hasher);
         self.clip_visible_length_samples.hash(&mut hasher);
+        self.reversed.hash(&mut hasher);
         self.notes.len().hash(&mut hasher);
         if let Some(first) = self.notes.first() {
             first.start_sample.hash(&mut hasher);
@@ -862,7 +880,11 @@ impl<Message> canvas::Program<Message> for MidiClipNotesCanvas {
                     let pitch = note.pitch.min(PITCH_MAX);
                     let clipped_start = note_start.max(visible_start);
                     let clipped_end = note_end.min(visible_end);
-                    let rel_start = clipped_start.saturating_sub(visible_start);
+                    let rel_start = if self.reversed {
+                        visible_end.saturating_sub(clipped_end)
+                    } else {
+                        clipped_start.saturating_sub(visible_start)
+                    };
                     let rel_len = clipped_end.saturating_sub(clipped_start).max(1);
                     let x = (rel_start as f32 / clip_len) * inner_w;
                     let w = ((rel_len as f32 / clip_len) * inner_w).max(1.0);
@@ -888,38 +910,24 @@ fn midi_clip_notes_overlay<Message: 'static>(
     notes: Arc<Vec<PianoNote>>,
     clip_offset_samples: usize,
     clip_visible_length_samples: usize,
+    reversed: bool,
 ) -> Element<'static, Message> {
     canvas(MidiClipNotesCanvas {
         notes,
         clip_offset_samples,
         clip_visible_length_samples,
+        reversed,
     })
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
 }
 
-fn audio_waveform_overlay<Message: 'static>(
-    peaks: ClipPeaks,
-    source_wav_path: Option<PathBuf>,
-    clip_offset: usize,
-    clip_length: usize,
-    max_length: usize,
-    source_length: usize,
-    stretch_ratio: f32,
-) -> Element<'static, Message> {
-    canvas(WaveformCanvas {
-        peaks,
-        source_wav_path,
-        clip_offset,
-        clip_length,
-        max_length,
-        source_length,
-        stretch_ratio,
-    })
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+fn audio_waveform_overlay<Message: 'static>(waveform: WaveformCanvas) -> Element<'static, Message> {
+    canvas(waveform)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn resolve_audio_clip_path(session_root: Option<&PathBuf>, clip_name: &str) -> Option<PathBuf> {
@@ -943,15 +951,16 @@ fn grouped_audio_waveform_overlay<Message: 'static>(
         let child_overlay = if child.is_group() {
             grouped_audio_waveform_overlay(child, session_root, pixels_per_sample, clip_height)
         } else {
-            audio_waveform_overlay(
-                child.peaks.clone(),
-                resolve_audio_clip_path(session_root, &child.name),
-                child.offset,
-                child.length,
-                child.max_length_samples,
-                child.source_length_samples,
-                child.stretch_ratio,
-            )
+            audio_waveform_overlay(WaveformCanvas {
+                peaks: child.peaks.clone(),
+                source_wav_path: resolve_audio_clip_path(session_root, &child.name),
+                clip_offset: child.offset,
+                clip_length: child.length,
+                max_length: child.max_length_samples,
+                source_length: child.source_length_samples,
+                stretch_ratio: child.stretch_ratio,
+                reversed: child.reversed,
+            })
         };
         stack = stack.push(
             pin(container(child_overlay)
@@ -1023,15 +1032,16 @@ impl<Message> AudioClip<Message> {
     where
         Message: 'static,
     {
-        audio_waveform_overlay(
+        audio_waveform_overlay(WaveformCanvas {
             peaks,
             source_wav_path,
             clip_offset,
             clip_length,
             max_length,
             source_length,
-            1.0,
-        )
+            stretch_ratio: 1.0,
+            reversed: false,
+        })
     }
 }
 
@@ -1123,15 +1133,19 @@ impl<Message: Clone + 'static> AudioClip<Message> {
         match self.mode {
             AudioClipMode::Preview => {
                 let preview_content = container(Stack::with_children(vec![
-                    audio_waveform_overlay(
-                        self.clip.peaks.clone(),
-                        resolve_audio_clip_path(self.session_root.as_ref(), &self.clip.name),
-                        self.clip.offset,
-                        self.clip.length,
-                        self.clip.max_length_samples,
-                        self.clip.source_length_samples,
-                        self.clip.stretch_ratio,
-                    ),
+                    audio_waveform_overlay(WaveformCanvas {
+                        peaks: self.clip.peaks.clone(),
+                        source_wav_path: resolve_audio_clip_path(
+                            self.session_root.as_ref(),
+                            &self.clip.name,
+                        ),
+                        clip_offset: self.clip.offset,
+                        clip_length: self.clip.length,
+                        max_length: self.clip.max_length_samples,
+                        source_length: self.clip.source_length_samples,
+                        stretch_ratio: self.clip.stretch_ratio,
+                        reversed: self.clip.reversed,
+                    }),
                     audio_clip_label_overlay(
                         self.label,
                         self.clip_width,
@@ -1192,15 +1206,19 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             self.clip_height,
                         )
                     } else {
-                        audio_waveform_overlay(
-                            self.clip.peaks.clone(),
-                            resolve_audio_clip_path(self.session_root.as_ref(), &self.clip.name),
-                            self.clip.offset,
-                            self.clip.length,
-                            self.clip.max_length_samples,
-                            self.clip.source_length_samples,
-                            self.clip.stretch_ratio,
-                        )
+                        audio_waveform_overlay(WaveformCanvas {
+                            peaks: self.clip.peaks.clone(),
+                            source_wav_path: resolve_audio_clip_path(
+                                self.session_root.as_ref(),
+                                &self.clip.name,
+                            ),
+                            clip_offset: self.clip.offset,
+                            clip_length: self.clip.length,
+                            max_length: self.clip.max_length_samples,
+                            source_length: self.clip.source_length_samples,
+                            stretch_ratio: self.clip.stretch_ratio,
+                            reversed: self.clip.reversed,
+                        })
                     },
                     audio_clip_label_overlay(
                         self.label,
@@ -1234,7 +1252,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             base,
                             muted_alpha,
                             normal_alpha,
-                            true,
+                            self.clip.reversed,
                         )),
                         border: Border {
                             radius: 8.0.into(),
@@ -1507,6 +1525,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                         notes,
                         self.clip.offset,
                         self.clip.length.max(1),
+                        self.clip.reversed,
                     ));
                 }
                 preview_layers.push(midi_clip_label_overlay(
@@ -1564,6 +1583,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                         notes,
                         self.clip.offset,
                         self.clip.length.max(1),
+                        self.clip.reversed,
                     ));
                 }
                 clip_layers.push(midi_clip_label_overlay(
@@ -1600,7 +1620,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                                     base,
                                     muted_alpha,
                                     normal_alpha,
-                                    false,
+                                    self.clip.reversed,
                                 )),
                                 border: Border {
                                     radius: 8.0.into(),
