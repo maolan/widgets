@@ -12,6 +12,7 @@ pub mod horizontal_slider;
 pub mod menu;
 pub mod meters;
 pub mod midi;
+pub mod multi_toggler;
 pub mod note_area;
 pub mod numeric_input;
 pub mod piano;
