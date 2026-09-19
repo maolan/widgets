@@ -75,9 +75,9 @@ pub enum Orientation {
 
 /// Ratio of the keyboard's cross-axis depth that black keys occupy.
 ///
-/// This matches the original Maolan vertical keyboard, where black keys
-/// protrude 60% of the keyboard depth.
-const BLACK_KEY_DEPTH_RATIO: f32 = 0.6;
+/// At 0.5 the black-key region and the visible white-key front are equally
+/// wide, so white keys are exactly twice as wide as black keys.
+const BLACK_KEY_DEPTH_RATIO: f32 = 0.5;
 
 /// Ratio of a white key's length that a black key occupies along the note axis.
 const BLACK_KEY_LENGTH_RATIO: f32 = 0.6;
@@ -511,8 +511,8 @@ fn draw_octave_degree270(
 
     let black_key_offsets = [1, 2, 4, 5, 6];
     let black_note_ids = [1, 3, 6, 8, 10];
-    let black_key_width = bounds.width * 0.6;
-    let black_key_height = white_key_height * 0.6;
+    let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
+    let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
 
     for (idx, offset) in black_key_offsets.iter().enumerate() {
         let note_id = black_note_ids[idx];
@@ -550,8 +550,8 @@ fn draw_partial_octave_degree270(
     let black_key_offsets = [1_u8, 2, 4];
     let black_note_ids = [1_u8, 3, 6];
     let white_key_height = bounds.height / white_note_ids.len() as f32;
-    let black_key_height = white_key_height * 0.6;
-    let black_key_width = bounds.width * 0.6;
+    let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
+    let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
 
     for (i, note_id) in white_note_ids.iter().enumerate() {
         let midi_note = octave * 12 + *note_id;
