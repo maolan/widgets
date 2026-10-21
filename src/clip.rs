@@ -21,6 +21,10 @@ pub type ClipPeaks = Arc<ClipPeaksData>;
 const CHECKPOINTS: usize = 16;
 const MAX_RENDER_COLUMNS: usize = 32_767;
 const RENDER_MARGIN_COLUMNS: usize = 2;
+/// Horizontal on-screen footprint of one waveform bar-mode column, in
+/// pixels. One column covers multiple screen pixels so the number of
+/// primitives per clip stays bounded.
+const COLUMN_WIDTH_PX: f32 = 2.0;
 /// Horizontal hit width of a clip's resize edges, in pixels. Shared with
 /// the editor's cursor hit-test so the pointer shape and the press behavior
 /// cover the same zone.
@@ -539,35 +543,47 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                         end_idx = (start_idx + 1).min(total_peaks);
                     }
                     let visible_bins = end_idx.saturating_sub(start_idx).max(1);
-                    let visible_columns =
-                        inner_w.ceil().max(1.0).min(MAX_RENDER_COLUMNS as f32) as usize;
+                    // Column counts are decimated (one column per
+                    // COLUMN_WIDTH_PX pixels), but zoom-dependent
+                    // trace/source-mode thresholds stay expressed in screen
+                    // pixels so rendering-mode decisions are unchanged.
+                    let pixel_columns = inner_w.ceil().max(1.0) as usize;
+                    let visible_columns = (inner_w / COLUMN_WIDTH_PX)
+                        .ceil()
+                        .max(1.0)
+                        .min(MAX_RENDER_COLUMNS as f32)
+                        as usize;
                     let x_step = inner_w / visible_columns as f32;
                     let margin_columns = RENDER_MARGIN_COLUMNS;
                     let total_columns = visible_columns + (margin_columns * 2);
-                    let margin_bins = ((visible_bins * margin_columns) / visible_columns).max(1);
+                    let margin_bins = ((visible_bins * margin_columns * COLUMN_WIDTH_PX as usize)
+                        / pixel_columns)
+                        .max(1);
                     let render_start_idx = start_idx.saturating_sub(margin_bins);
                     let render_end_idx = end_idx.saturating_add(margin_bins).min(total_peaks);
                     let render_bins = render_end_idx.saturating_sub(render_start_idx).max(1);
                     let stored_samples_per_bin = max_len as f32 / total_peaks.max(1) as f32;
                     let visible_source_samples =
                         clip_end_sample.saturating_sub(self.clip_offset).max(1);
-                    let required_samples_per_column =
-                        visible_source_samples as f32 / visible_columns.max(1) as f32;
-                    let high_zoom_source_mode = required_samples_per_column < 1.0;
+                    let required_samples_per_px =
+                        visible_source_samples as f32 / pixel_columns.max(1) as f32;
+                    let high_zoom_source_mode = required_samples_per_px < 1.0;
                     let trace_mode = high_zoom_source_mode
-                        || required_samples_per_column <= 4.0
-                        || visible_bins <= visible_columns.saturating_mul(2);
+                        || required_samples_per_px <= 4.0
+                        || visible_bins <= pixel_columns.saturating_mul(2);
                     let use_source_columns = self.source_wav_path.is_some()
-                        && required_samples_per_column + f32::EPSILON < stored_samples_per_bin;
+                        && required_samples_per_px + f32::EPSILON < stored_samples_per_bin;
                     let mut source_mode_columns = total_columns;
                     let mut source_mode_margin = margin_columns;
                     let mut source_mode_x_step = x_step;
                     let mut source_mode_bin_w = x_step.max(1.0);
                     let source_columns = if use_source_columns {
                         let source_margin_samples = if high_zoom_source_mode {
-                            margin_columns
+                            margin_columns * COLUMN_WIDTH_PX as usize
                         } else {
-                            ((visible_source_samples * margin_columns) / visible_columns).max(1)
+                            ((visible_source_samples * margin_columns * COLUMN_WIDTH_PX as usize)
+                                / pixel_columns)
+                                .max(1)
                         };
                         if high_zoom_source_mode {
                             source_mode_columns =
@@ -718,48 +734,43 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                             waveform_fill,
                         );
                         let edge_h = (h * 0.2).clamp(1.0, 3.0);
-                        frame.fill(
-                            &Path::rectangle(Point::new(x, y), iced::Size::new(bin_w, edge_h)),
-                            edge_shade,
-                        );
-                        frame.fill(
-                            &Path::rectangle(
+                        let shade_path = Path::new(|builder| {
+                            builder.rectangle(Point::new(x, y), iced::Size::new(bin_w, edge_h));
+                            builder.rectangle(
                                 Point::new(x, y + h - edge_h),
                                 iced::Size::new(bin_w, edge_h),
-                            ),
-                            edge_shade,
-                        );
+                            );
+                        });
+                        frame.fill(&shade_path, edge_shade);
 
                         if h >= 3.0 {
-                            frame.fill(
-                                &Path::rectangle(Point::new(x, y), iced::Size::new(bin_w, 1.0)),
-                                waveform_edge,
-                            );
-                            frame.fill(
-                                &Path::rectangle(
+                            let edge_path = Path::new(|builder| {
+                                builder.rectangle(Point::new(x, y), iced::Size::new(bin_w, 1.0));
+                                builder.rectangle(
                                     Point::new(x, y + h - 1.0),
                                     iced::Size::new(bin_w, 1.0),
-                                ),
-                                waveform_edge,
-                            );
+                                );
+                            });
+                            frame.fill(&edge_path, waveform_edge);
                         }
 
-                        if max_val >= clip_level {
+                        if max_val >= clip_level || -min_val >= clip_level {
                             let clip_h = h.clamp(1.0, 3.0);
-                            frame.fill(
-                                &Path::rectangle(Point::new(x, y), iced::Size::new(bin_w, clip_h)),
-                                clip_color,
-                            );
-                        }
-                        if -min_val >= clip_level {
-                            let clip_h = h.clamp(1.0, 3.0);
-                            frame.fill(
-                                &Path::rectangle(
-                                    Point::new(x, y + h - clip_h),
-                                    iced::Size::new(bin_w, clip_h),
-                                ),
-                                clip_color,
-                            );
+                            let clip_path = Path::new(|builder| {
+                                if max_val >= clip_level {
+                                    builder.rectangle(
+                                        Point::new(x, y),
+                                        iced::Size::new(bin_w, clip_h),
+                                    );
+                                }
+                                if -min_val >= clip_level {
+                                    builder.rectangle(
+                                        Point::new(x, y + h - clip_h),
+                                        iced::Size::new(bin_w, clip_h),
+                                    );
+                                }
+                            });
+                            frame.fill(&clip_path, clip_color);
                         }
                     }
                 }
