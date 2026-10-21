@@ -21,7 +21,10 @@ pub type ClipPeaks = Arc<ClipPeaksData>;
 const CHECKPOINTS: usize = 16;
 const MAX_RENDER_COLUMNS: usize = 32_767;
 const RENDER_MARGIN_COLUMNS: usize = 2;
-const DEFAULT_RESIZE_HANDLE_WIDTH: f32 = 5.0;
+/// Horizontal hit width of a clip's resize edges, in pixels. Shared with
+/// the editor's cursor hit-test so the pointer shape and the press behavior
+/// cover the same zone.
+pub const CLIP_RESIZE_HANDLE_WIDTH: f32 = 8.0;
 const CLIP_NORMAL_ALPHA: f32 = 0.68;
 const CLIP_SELECTED_ALPHA: f32 = 0.78;
 const CLIP_MUTED_ALPHA: f32 = 0.34;
@@ -1066,7 +1069,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
             selected_base_color: Color::from_rgb8(96, 126, 186),
             border: Color::from_rgb8(78, 93, 130),
             selected_border: Color::from_rgb8(176, 218, 255),
-            resize_handle_width: DEFAULT_RESIZE_HANDLE_WIDTH,
+            resize_handle_width: CLIP_RESIZE_HANDLE_WIDTH,
         }
     }
 
@@ -1178,9 +1181,11 @@ impl<Message: Clone + 'static> AudioClip<Message> {
             AudioClipMode::Widget => {
                 let interaction = self.interaction.expect("audio clip interaction");
                 let clip_muted = self.clip.muted;
+                // Keep a grabbable strip in the middle of very narrow clips.
+                let resize_handle_width = self.resize_handle_width.min(self.clip_width / 2.0);
                 let left_edge_zone = mouse_area(
                     Space::new()
-                        .width(Length::Fixed(self.resize_handle_width))
+                        .width(Length::Fixed(resize_handle_width))
                         .height(Length::Fill),
                 )
                 .interaction(mouse::Interaction::Pointer)
@@ -1189,7 +1194,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                 .on_press(interaction.edges.left_press.clone());
                 let right_edge_zone = mouse_area(
                     Space::new()
-                        .width(Length::Fixed(self.resize_handle_width))
+                        .width(Length::Fixed(resize_handle_width))
                         .height(Length::Fill),
                 )
                 .interaction(mouse::Interaction::Pointer)
@@ -1369,7 +1374,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                     clip_with_fades,
                     pin(left_edge_zone).position(Point::new(0.0, 0.0)).into(),
                     pin(right_edge_zone)
-                        .position(Point::new(self.clip_width - self.resize_handle_width, 0.0))
+                        .position(Point::new(self.clip_width - resize_handle_width, 0.0))
                         .into(),
                 ]);
                 let base = mouse_area(interactive_clip);
@@ -1457,7 +1462,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
             selected_base_color: Color::from_rgb8(84, 133, 72),
             border: Color::from_rgb8(148, 215, 118),
             selected_border: Color::from_rgb8(196, 255, 151),
-            resize_handle_width: DEFAULT_RESIZE_HANDLE_WIDTH,
+            resize_handle_width: CLIP_RESIZE_HANDLE_WIDTH,
         }
     }
 
@@ -1558,9 +1563,11 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
             }
             MIDIClipMode::Widget => {
                 let interaction = self.interaction.expect("midi clip interaction");
+                // Keep a grabbable strip in the middle of very narrow clips.
+                let resize_handle_width = self.resize_handle_width.min(self.clip_width / 2.0);
                 let left_edge_zone = mouse_area(
                     Space::new()
-                        .width(Length::Fixed(self.resize_handle_width))
+                        .width(Length::Fixed(resize_handle_width))
                         .height(Length::Fill),
                 )
                 .interaction(mouse::Interaction::Pointer)
@@ -1569,7 +1576,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                 .on_press(interaction.edges.left_press.clone());
                 let right_edge_zone = mouse_area(
                     Space::new()
-                        .width(Length::Fixed(self.resize_handle_width))
+                        .width(Length::Fixed(resize_handle_width))
                         .height(Length::Fill),
                 )
                 .interaction(mouse::Interaction::Pointer)
@@ -1650,7 +1657,7 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
                     clip_widget.into(),
                     pin(left_edge_zone).position(Point::new(0.0, 0.0)).into(),
                     pin(right_edge_zone)
-                        .position(Point::new(self.clip_width - self.resize_handle_width, 0.0))
+                        .position(Point::new(self.clip_width - resize_handle_width, 0.0))
                         .into(),
                 ]);
                 let base = mouse_area(interactive_clip);

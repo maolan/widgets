@@ -1,13 +1,13 @@
 [package]
 name = "maolan-widgets"
-version = "0.0.39"
+version = "0.0.40"
 edition = "2024"
 description = "Widgets used for Maolan DAW"
 license = "BSD-2-Clause"
 readme = "README.md"
 repository = "https://github.com/maolan/widgets"
-homepage = "https://maolan.github.io"
-documentation = "https://docs.rs/maolan-widgets"
+homepage = "https://maolan.rs"
+documentation = "https://doc.maolan.rs"
 keywords = ["audio", "midi", "daw", "widgets"]
 categories = ["multimedia::audio"]
 
