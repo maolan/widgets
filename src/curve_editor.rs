@@ -1,7 +1,9 @@
 use iced::{
     Color, Event, Point, Rectangle, Renderer, Size, Theme, mouse,
-    widget::canvas::{Action as CanvasAction, Frame, Geometry, Path, Program, Stroke},
+    widget::canvas::{Action as CanvasAction, Cache, Frame, Geometry, Path, Program, Stroke},
 };
+use std::cell::Cell;
+use std::hash::{Hash, Hasher};
 
 /// A single sample/value point on a normalized curve.
 ///
@@ -44,6 +46,8 @@ pub struct CurveEditor<M: CurveEditorMessage> {
 
 pub struct CurveEditorState {
     mode: CurveEditorDragMode,
+    cache: Cache,
+    last_hash: Cell<u64>,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -63,6 +67,8 @@ impl Default for CurveEditorState {
     fn default() -> Self {
         Self {
             mode: CurveEditorDragMode::None,
+            cache: Cache::new(),
+            last_hash: Cell::new(0),
         }
     }
 }
@@ -144,6 +150,25 @@ impl<M: CurveEditorMessage> CurveEditor<M> {
         };
         Point::new(x, y)
     }
+
+    fn shape_hash(&self, bounds: Rectangle) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bounds.width.to_bits().hash(&mut hasher);
+        bounds.height.to_bits().hash(&mut hasher);
+        self.pixels_per_sample.to_bits().hash(&mut hasher);
+        self.color.r.to_bits().hash(&mut hasher);
+        self.color.g.to_bits().hash(&mut hasher);
+        self.color.b.to_bits().hash(&mut hasher);
+        self.color.a.to_bits().hash(&mut hasher);
+        self.dot_radius.to_bits().hash(&mut hasher);
+        self.line_width.to_bits().hash(&mut hasher);
+        self.points.len().hash(&mut hasher);
+        for point in &self.points {
+            point.sample.hash(&mut hasher);
+            point.value.to_bits().hash(&mut hasher);
+        }
+        hasher.finish()
+    }
 }
 
 impl<M: CurveEditorMessage> Program<M> for CurveEditor<M> {
@@ -214,24 +239,36 @@ impl<M: CurveEditorMessage> Program<M> for CurveEditor<M> {
             return vec![];
         }
 
-        let mut frame = Frame::new(renderer, bounds.size());
-
-        let mut sorted = self.points.clone();
-        sorted.sort_unstable_by_key(|point| point.sample);
-
-        let bar_width = self.line_width.max(1.0);
-        for point in &sorted {
-            let top = self.point_position(*point, bounds);
-            let rect = Path::rectangle(
-                Point::new(top.x - bar_width / 2.0, top.y),
-                Size::new(bar_width, (bounds.height - top.y).max(1.0)),
-            );
-            frame.fill(&rect, self.color);
-            let circle = Path::circle(top, self.dot_radius.max(0.0));
-            frame.fill(&circle, self.color);
+        let hash = self.shape_hash(bounds);
+        if state.last_hash.get() != hash {
+            state.cache.clear();
+            state.last_hash.set(hash);
         }
 
+        let geom = state
+            .cache
+            .draw(renderer, bounds.size(), |frame: &mut Frame| {
+                let mut sorted = self.points.clone();
+                sorted.sort_unstable_by_key(|point| point.sample);
+
+                let bar_width = self.line_width.max(1.0);
+                for point in &sorted {
+                    let top = self.point_position(*point, bounds);
+                    let rect = Path::rectangle(
+                        Point::new(top.x - bar_width / 2.0, top.y),
+                        Size::new(bar_width, (bounds.height - top.y).max(1.0)),
+                    );
+                    frame.fill(&rect, self.color);
+                    let circle = Path::circle(top, self.dot_radius.max(0.0));
+                    frame.fill(&circle, self.color);
+                }
+            });
+
+        // The in-progress draw preview is transient state; render it as a
+        // small uncached overlay so dragging never rebuilds the cached curve.
+        let mut geometry = vec![geom];
         if let CurveEditorDragMode::Drawing { start, current } = state.mode {
+            let mut frame = Frame::new(renderer, bounds.size());
             let line = Path::line(start, current);
             frame.stroke(
                 &line,
@@ -239,8 +276,9 @@ impl<M: CurveEditorMessage> Program<M> for CurveEditor<M> {
                     .with_color(PREVIEW_COLOR)
                     .with_width(self.line_width),
             );
+            geometry.push(frame.into_geometry());
         }
 
-        vec![frame.into_geometry()]
+        geometry
     }
 }
