@@ -371,13 +371,32 @@ struct WaveformCanvas {
     source_length: usize,
     stretch_ratio: f32,
     reversed: bool,
+    log_scaled: bool,
 }
 
 impl WaveformCanvas {
+    /// Ardour-style log waveform shaping: amplitude is converted to dB and
+    /// shaped with `alt_log_meter`, preserving sign. 0 dBFS maps to ±1.0 and
+    /// -18 dBFS maps to roughly ±0.75.
+    fn log_scale_sample(v: f32) -> f32 {
+        if v == 0.0 {
+            return 0.0;
+        }
+        let db = 20.0 * v.abs().log10();
+        const MIN_DB: f32 = -192.0;
+        let shaped = if db < MIN_DB {
+            0.0
+        } else {
+            ((db - MIN_DB) / (0.0 - MIN_DB)).powf(8.0)
+        };
+        (v.signum() * shaped).clamp(-1.0, 1.0)
+    }
+
     fn shape_hash(&self, bounds: Rectangle) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         bounds.width.to_bits().hash(&mut hasher);
         bounds.height.to_bits().hash(&mut hasher);
+        self.log_scaled.hash(&mut hasher);
         self.clip_offset.hash(&mut hasher);
         self.clip_length.hash(&mut hasher);
         self.max_length.hash(&mut hasher);
@@ -658,6 +677,11 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                                     [pair.0, pair.1]
                                 };
                                 let sample = ((pair[0] + pair[1]) * 0.5).clamp(-1.0, 1.0);
+                                let sample = if self.log_scaled {
+                                    Self::log_scale_sample(sample)
+                                } else {
+                                    sample
+                                };
                                 let x = if source_columns.is_some() {
                                     (col as f32 - source_mode_margin as f32) * source_mode_x_step
                                 } else {
@@ -711,9 +735,17 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                             };
                             pair
                         };
-                        let top = (center_y - (max_val * half_span))
+                        let (disp_min, disp_max) = if self.log_scaled {
+                            (
+                                Self::log_scale_sample(min_val),
+                                Self::log_scale_sample(max_val),
+                            )
+                        } else {
+                            (min_val, max_val)
+                        };
+                        let top = (center_y - (disp_max * half_span))
                             .clamp(channel_top, channel_top + channel_h);
-                        let bottom = (center_y - (min_val * half_span))
+                        let bottom = (center_y - (disp_min * half_span))
                             .clamp(channel_top, channel_top + channel_h);
                         let y = top.min(bottom);
                         let h = (bottom - top).abs().max(1.0);
@@ -958,12 +990,19 @@ fn grouped_audio_waveform_overlay<Message: 'static>(
     session_root: Option<&PathBuf>,
     pixels_per_sample: f32,
     clip_height: f32,
+    log_scaled: bool,
 ) -> Element<'static, Message> {
     let mut stack = Stack::new();
     for child in &clip.grouped_clips {
         let child_width = (child.length as f32 * pixels_per_sample).max(12.0);
         let child_overlay = if child.is_group() {
-            grouped_audio_waveform_overlay(child, session_root, pixels_per_sample, clip_height)
+            grouped_audio_waveform_overlay(
+                child,
+                session_root,
+                pixels_per_sample,
+                clip_height,
+                log_scaled,
+            )
         } else {
             audio_waveform_overlay(WaveformCanvas {
                 peaks: child.peaks.clone(),
@@ -974,6 +1013,7 @@ fn grouped_audio_waveform_overlay<Message: 'static>(
                 source_length: child.source_length_samples,
                 stretch_ratio: child.stretch_ratio,
                 reversed: child.reversed,
+                log_scaled,
             })
         };
         stack = stack.push(
@@ -1015,6 +1055,7 @@ pub struct AudioClip<Message> {
     border: Color,
     selected_border: Color,
     resize_handle_width: f32,
+    log_scaled: bool,
 }
 
 impl<Message> AudioClip<Message> {
@@ -1046,6 +1087,29 @@ impl<Message> AudioClip<Message> {
     where
         Message: 'static,
     {
+        Self::waveform_overlay_scaled(
+            peaks,
+            source_wav_path,
+            clip_offset,
+            clip_length,
+            max_length,
+            source_length,
+            false,
+        )
+    }
+
+    pub fn waveform_overlay_scaled(
+        peaks: ClipPeaks,
+        source_wav_path: Option<PathBuf>,
+        clip_offset: usize,
+        clip_length: usize,
+        max_length: usize,
+        source_length: usize,
+        log_scaled: bool,
+    ) -> Element<'static, Message>
+    where
+        Message: 'static,
+    {
         audio_waveform_overlay(WaveformCanvas {
             peaks,
             source_wav_path,
@@ -1055,6 +1119,7 @@ impl<Message> AudioClip<Message> {
             source_length,
             stretch_ratio: 1.0,
             reversed: false,
+            log_scaled,
         })
     }
 }
@@ -1081,6 +1146,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
             border: Color::from_rgb8(78, 93, 130),
             selected_border: Color::from_rgb8(176, 218, 255),
             resize_handle_width: CLIP_RESIZE_HANDLE_WIDTH,
+            log_scaled: false,
         }
     }
 
@@ -1143,6 +1209,11 @@ impl<Message: Clone + 'static> AudioClip<Message> {
         self
     }
 
+    pub fn log_scaled(mut self, log_scaled: bool) -> Self {
+        self.log_scaled = log_scaled;
+        self
+    }
+
     pub fn into_element(self) -> Element<'static, Message> {
         match self.mode {
             AudioClipMode::Preview => {
@@ -1159,6 +1230,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                         source_length: self.clip.source_length_samples,
                         stretch_ratio: self.clip.stretch_ratio,
                         reversed: self.clip.reversed,
+                        log_scaled: self.log_scaled,
                     }),
                     audio_clip_label_overlay(
                         self.label,
@@ -1220,6 +1292,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             self.session_root.as_ref(),
                             self.pixels_per_sample,
                             self.clip_height,
+                            self.log_scaled,
                         )
                     } else {
                         audio_waveform_overlay(WaveformCanvas {
@@ -1234,6 +1307,7 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                             source_length: self.clip.source_length_samples,
                             stretch_ratio: self.clip.stretch_ratio,
                             reversed: self.clip.reversed,
+                            log_scaled: self.log_scaled,
                         })
                     },
                     audio_clip_label_overlay(
@@ -1692,7 +1766,37 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_draw_fade_overlay, visible_fade_overlay_width};
+    use super::{WaveformCanvas, should_draw_fade_overlay, visible_fade_overlay_width};
+
+    #[test]
+    fn log_scale_sample_maps_full_scale_to_unity() {
+        assert_eq!(WaveformCanvas::log_scale_sample(1.0), 1.0);
+        assert_eq!(WaveformCanvas::log_scale_sample(-1.0), -1.0);
+        assert_eq!(WaveformCanvas::log_scale_sample(0.0), 0.0);
+    }
+
+    #[test]
+    fn log_scale_sample_boosts_quiet_material() {
+        let minus_18_db = 10.0_f32.powf(-18.0 / 20.0);
+        // (174/192)^8, per the alt_log_meter shape.
+        let expected = (174.0_f32 / 192.0).powf(8.0);
+        let scaled = WaveformCanvas::log_scale_sample(minus_18_db);
+        assert!((scaled - expected).abs() < 1.0e-4, "scaled = {scaled}");
+        assert!(scaled > minus_18_db, "log scale must boost quiet material");
+        let scaled_neg = WaveformCanvas::log_scale_sample(-minus_18_db);
+        assert!(
+            (scaled_neg + expected).abs() < 1.0e-4,
+            "scaled_neg = {scaled_neg}"
+        );
+    }
+
+    #[test]
+    fn log_scale_sample_clamps_out_of_range_input() {
+        assert!(WaveformCanvas::log_scale_sample(4.0) <= 1.0);
+        assert!(WaveformCanvas::log_scale_sample(-4.0) >= -1.0);
+        // Subnormal amplitudes below -192 dB floor render as silence.
+        assert_eq!(WaveformCanvas::log_scale_sample(1.0e-12), 0.0);
+    }
 
     #[test]
     fn visible_fade_overlay_width_grows_with_zoom_below_full_size() {
