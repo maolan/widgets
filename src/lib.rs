@@ -1,3 +1,4 @@
+pub mod adsr;
 pub mod arch_slider;
 pub mod audio;
 pub mod audio_setup;
