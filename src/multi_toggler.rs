@@ -13,11 +13,26 @@ pub enum Orientation {
     Vertical,
 }
 
+/// Where the selected-option label is drawn relative to the option track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LabelPosition {
+    /// Label above the track (default).
+    #[default]
+    Above,
+    /// Label below the track.
+    Below,
+    /// Label left of the track.
+    Left,
+    /// Label right of the track.
+    Right,
+}
+
 pub struct MultiToggler<'a, Message> {
     labels: Vec<String>,
     selected: usize,
     on_change: Box<dyn Fn(usize) -> Message + 'a>,
     orientation: Orientation,
+    label_position: LabelPosition,
     width: Length,
     height: Length,
     text_size: Pixels,
@@ -38,11 +53,16 @@ impl<'a, Message> MultiToggler<'a, Message> {
         L: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        let label_position = match orientation {
+            Orientation::Horizontal => LabelPosition::Above,
+            Orientation::Vertical => LabelPosition::Right,
+        };
         Self {
             labels: labels.into_iter().map(Into::into).collect(),
             selected,
             on_change: Box::new(on_change),
             orientation,
+            label_position,
             width: Length::Shrink,
             height: Length::Shrink,
             text_size: Pixels(12.0),
@@ -71,6 +91,11 @@ impl<'a, Message> MultiToggler<'a, Message> {
             spacing: 8.0,
             label_extent: 72.0,
         }
+    }
+
+    pub fn label_position(mut self, label_position: LabelPosition) -> Self {
+        self.label_position = label_position;
+        self
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -140,21 +165,28 @@ impl<'a, Message> MultiToggler<'a, Message> {
         self.text_size.0 * 1.4
     }
 
-    fn track_bounds(&self, bounds: Rectangle) -> Rectangle {
+    fn track_size(&self) -> Size {
         let count = self.option_count() as f32;
         match self.orientation {
-            Orientation::Horizontal => Rectangle {
-                x: bounds.x,
-                y: bounds.y,
-                width: self.size * count,
-                height: self.size,
-            },
-            Orientation::Vertical => Rectangle {
-                x: bounds.x,
-                y: bounds.y,
-                width: self.size,
-                height: self.size * count,
-            },
+            Orientation::Horizontal => Size::new(self.size * count, self.size),
+            Orientation::Vertical => Size::new(self.size, self.size * count),
+        }
+    }
+
+    fn track_bounds(&self, bounds: Rectangle) -> Rectangle {
+        let track = self.track_size();
+        let label_height = self.label_height();
+        let (offset_x, offset_y) = match self.label_position {
+            LabelPosition::Above => (0.0, label_height + self.spacing),
+            LabelPosition::Below => (0.0, 0.0),
+            LabelPosition::Left => (self.label_extent + self.spacing, 0.0),
+            LabelPosition::Right => (0.0, 0.0),
+        };
+        Rectangle {
+            x: bounds.x + offset_x,
+            y: bounds.y + offset_y,
+            width: track.width,
+            height: track.height,
         }
     }
 
@@ -174,22 +206,31 @@ impl<'a, Message> MultiToggler<'a, Message> {
     fn label_bounds(&self, bounds: Rectangle) -> Rectangle {
         let track = self.track_bounds(bounds);
         let label_height = self.label_height();
-        match self.orientation {
-            Orientation::Horizontal => Rectangle {
+        match self.label_position {
+            LabelPosition::Above => Rectangle {
+                x: track.x,
+                y: bounds.y,
+                width: self.label_extent,
+                height: label_height,
+            },
+            LabelPosition::Below => Rectangle {
                 x: track.x,
                 y: track.y + track.height + self.spacing,
                 width: self.label_extent,
                 height: label_height,
             },
-            Orientation::Vertical => {
-                let center = self.option_center(track, self.selected());
-                Rectangle {
-                    x: track.x + track.width + self.spacing,
-                    y: center.y - label_height * 0.5,
-                    width: self.label_extent,
-                    height: label_height,
-                }
-            }
+            LabelPosition::Left => Rectangle {
+                x: bounds.x,
+                y: track.center_y() - label_height * 0.5,
+                width: self.label_extent,
+                height: label_height,
+            },
+            LabelPosition::Right => Rectangle {
+                x: track.x + track.width + self.spacing,
+                y: track.center_y() - label_height * 0.5,
+                width: self.label_extent,
+                height: label_height,
+            },
         }
     }
 
@@ -268,15 +309,16 @@ where
         _renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let option_count = self.option_count() as f32;
-        let default_size = match self.orientation {
-            Orientation::Horizontal => Size::new(
-                (self.size * option_count).max(self.label_extent),
-                self.size + self.spacing + self.label_height(),
+        let track = self.track_size();
+        let label_height = self.label_height();
+        let default_size = match self.label_position {
+            LabelPosition::Above | LabelPosition::Below => Size::new(
+                track.width.max(self.label_extent),
+                label_height + self.spacing + track.height,
             ),
-            Orientation::Vertical => Size::new(
-                self.size + self.spacing + self.label_extent,
-                self.size * option_count,
+            LabelPosition::Left | LabelPosition::Right => Size::new(
+                track.width + self.spacing + self.label_extent,
+                track.height.max(label_height),
             ),
         };
         let size = limits.width(self.width).height(self.height).resolve(
@@ -462,7 +504,8 @@ mod tests {
 
     #[test]
     fn horizontal_index_at_uses_segments() {
-        let toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index);
+        let toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
+            .label_position(LabelPosition::Below);
         let bounds = Rectangle {
             x: 10.0,
             y: 20.0,
@@ -477,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_track_and_label_are_left_aligned() {
+    fn horizontal_label_above_track_by_default() {
         let toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index);
         let bounds = Rectangle {
             x: 10.0,
@@ -489,10 +532,70 @@ mod tests {
         let track = toggler.track_bounds(bounds);
         assert_eq!(track.x, bounds.x);
         assert_eq!(track.width, 48.0);
+        assert_eq!(track.y, bounds.y + toggler.label_height() + toggler.spacing);
 
         let label = toggler.label_bounds(bounds);
         assert_eq!(label.x, track.x);
         assert_eq!(label.width, 72.0);
+        assert!(label.y < track.y, "label should sit above the track");
+    }
+
+    #[test]
+    fn horizontal_label_below_places_track_at_top() {
+        let toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
+            .label_position(LabelPosition::Below);
+        let bounds = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: 90.0,
+            height: 48.0,
+        };
+
+        let track = toggler.track_bounds(bounds);
+        assert_eq!(track.y, bounds.y);
+
+        let label = toggler.label_bounds(bounds);
+        assert!(label.y > track.y, "label should sit below the track");
+        assert_eq!(label.x, track.x);
+    }
+
+    #[test]
+    fn label_left_pushes_track_right_and_centers_label() {
+        let toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
+            .label_position(LabelPosition::Left);
+        let bounds = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: 160.0,
+            height: 24.0,
+        };
+
+        let track = toggler.track_bounds(bounds);
+        assert_eq!(track.x, bounds.x + toggler.label_extent + toggler.spacing);
+        assert_eq!(track.y, bounds.y);
+
+        let label = toggler.label_bounds(bounds);
+        assert_eq!(label.x, bounds.x);
+        assert!((label.center_y() - track.center_y()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn label_right_places_label_beside_track() {
+        let toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
+            .label_position(LabelPosition::Right);
+        let bounds = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: 160.0,
+            height: 24.0,
+        };
+
+        let track = toggler.track_bounds(bounds);
+        assert_eq!(track.x, bounds.x);
+
+        let label = toggler.label_bounds(bounds);
+        assert_eq!(label.x, track.x + track.width + toggler.spacing);
+        assert!((label.center_y() - track.center_y()).abs() < 1e-6);
     }
 
     #[test]
@@ -513,7 +616,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn click_publishes_selected_index() {
-        let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index);
+        let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
+            .label_position(LabelPosition::Below);
         let mut tree = test_tree();
         let layout = test_layout(90.0, 24.0);
         let mut messages = Vec::new();
@@ -540,7 +644,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn drag_can_publish_return_to_starting_index() {
-        let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index);
+        let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
+            .label_position(LabelPosition::Below);
         let mut tree = test_tree();
         let layout = test_layout(90.0, 24.0);
         let renderer = ();
@@ -586,7 +691,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn click_on_current_index_does_not_publish() {
-        let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 1, |index| index);
+        let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 1, |index| index)
+            .label_position(LabelPosition::Below);
         let mut tree = test_tree();
         let layout = test_layout(90.0, 24.0);
         let mut messages = Vec::new();

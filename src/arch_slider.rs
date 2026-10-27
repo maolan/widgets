@@ -86,6 +86,16 @@ impl<'a, Message> ArchSlider<'a, Message> {
         self
     }
 
+    pub fn track_width(mut self, track_width: f32) -> Self {
+        self.track_width = track_width.max(1.0);
+        self
+    }
+
+    pub fn handle_radius(mut self, handle_radius: f32) -> Self {
+        self.handle_radius = handle_radius.max(0.5);
+        self
+    }
+
     pub fn step(mut self, step: f32) -> Self {
         self.step = Some(step.abs()).filter(|step| *step > 0.0);
         self
