@@ -79,8 +79,16 @@ pub enum Orientation {
 /// wide, so white keys are exactly twice as wide as black keys.
 const BLACK_KEY_DEPTH_RATIO: f32 = 0.5;
 
-/// Ratio of a white key's length that a black key occupies along the note axis.
-const BLACK_KEY_LENGTH_RATIO: f32 = 0.6;
+// White-key fronts meet at the center of an intervening black-key column.
+// Adjacent white keys (E/F and B/C) meet at the semitone boundary.
+fn white_key_end(note: u8, note_count: u8) -> f32 {
+    let next = note + 1;
+    if next < note_count && is_black_key(next) {
+        f32::from(next) + 0.5
+    } else {
+        f32::from(next)
+    }
+}
 
 fn velocity_from_v(v: f32, depth: f32) -> u8 {
     let normalized = (v / depth).clamp(0.0, 1.0);
@@ -101,129 +109,26 @@ pub fn note_at_in_range(
     if note_count == 0 {
         return None;
     }
-    if orientation == Orientation::Degree270 {
-        return note_at_in_range_degree270(cursor, bounds, note_count);
-    }
     let natural_cursor = to_natural_cursor(orientation, bounds, cursor);
     let natural = natural_bounds(orientation, bounds);
     let height = natural.height;
     let width = natural.width;
-    let white_notes: &[u8] = if note_count >= 12 {
-        &[0, 2, 4, 5, 7, 9, 11]
-    } else {
-        &[0, 2, 4, 5, 7]
-    };
-    let white_key_count = white_notes.iter().take_while(|&n| *n < note_count).count() as f32;
-    if white_key_count == 0.0 {
-        return None;
-    }
-    let white_key_size = height / white_key_count;
+    let note_size = height / f32::from(note_count);
     let black_key_width = width * BLACK_KEY_DEPTH_RATIO;
-    let black_key_length = white_key_size * BLACK_KEY_LENGTH_RATIO;
     let u = natural_cursor.x.clamp(0.0, height);
     let v = natural_cursor.y;
-
-    let (black_offsets, black_notes): (&[u8], &[u8]) = if note_count >= 12 {
-        (&[1, 2, 4, 5, 6], &[1, 3, 6, 8, 10])
-    } else {
-        (&[1, 2, 4], &[1, 3, 6])
-    };
-
     if v <= black_key_width {
-        for (idx, &note_id) in black_notes
-            .iter()
-            .enumerate()
-            .take_while(|&(_, n)| *n < note_count)
-        {
-            let center = black_offsets[idx] as f32 * white_key_size;
-            if (u - center).abs() <= black_key_length * 0.5 {
-                let velocity = velocity_from_v(v, black_key_width);
-                return Some((note_id, velocity));
-            }
+        let note_id = (u / note_size).floor().min(f32::from(note_count - 1)) as u8;
+        if is_black_key(note_id) {
+            return Some((note_id, velocity_from_v(v, black_key_width)));
         }
     }
+    let note_id = (0..note_count)
+        .filter(|&note| !is_black_key(note))
+        .find(|&note| u <= white_key_end(note, note_count) * note_size)?;
 
-    let index = (u / white_key_size)
-        .clamp(0.0, white_key_count - 1.0)
-        .floor() as usize;
-    let note_id = white_notes.get(index).copied()?;
     let velocity = velocity_from_v(v, width);
     Some((note_id, velocity))
-}
-
-fn note_at_in_range_degree270(
-    cursor: Point,
-    bounds: Rectangle,
-    note_count: u8,
-) -> Option<(u8, u8)> {
-    if note_count < NOTES_PER_OCTAVE as u8 {
-        let white_note_ids = [0_u8, 2, 4, 5, 7];
-        let black_key_offsets = [1_u8, 2, 4];
-        let black_note_ids = [1_u8, 3, 6];
-        let white_key_height = bounds.height / white_note_ids.len() as f32;
-        let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
-        let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
-
-        if cursor.x <= black_key_width {
-            for (idx, offset) in black_key_offsets.iter().enumerate() {
-                let note_id = black_note_ids[idx];
-                if note_id >= note_count {
-                    continue;
-                }
-                let y_pos_black = bounds.height
-                    - (f32::from(*offset) * white_key_height)
-                    - (black_key_height * 0.5);
-                if cursor.y >= y_pos_black && cursor.y <= y_pos_black + black_key_height {
-                    let velocity = velocity_from_v(cursor.x, black_key_width);
-                    return Some((note_id, velocity));
-                }
-            }
-        }
-
-        for (i, note_id) in white_note_ids.iter().enumerate() {
-            let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
-            if cursor.y >= y_pos && cursor.y <= y_pos + white_key_height {
-                let velocity = velocity_from_v(cursor.x, bounds.width);
-                return Some((*note_id, velocity));
-            }
-        }
-        return None;
-    }
-    let white_key_height = bounds.height / 7.0;
-    let black_key_offsets = [1, 2, 4, 5, 6];
-    let black_note_ids = [1, 3, 6, 8, 10];
-    let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
-    let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
-
-    if cursor.x <= black_key_width {
-        for (idx, offset) in black_key_offsets.iter().enumerate() {
-            let y_pos_black =
-                bounds.height - (*offset as f32 * white_key_height) - (black_key_height * 0.5);
-            if cursor.y >= y_pos_black && cursor.y <= y_pos_black + black_key_height {
-                let velocity = velocity_from_v(cursor.x, black_key_width);
-                return Some((black_note_ids[idx], velocity));
-            }
-        }
-    }
-
-    for i in 0..7 {
-        let note_id = match i {
-            0 => 0,
-            1 => 2,
-            2 => 4,
-            3 => 5,
-            4 => 7,
-            5 => 9,
-            6 => 11,
-            _ => 0,
-        };
-        let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
-        if cursor.y >= y_pos && cursor.y <= y_pos + white_key_height {
-            let velocity = velocity_from_v(cursor.x, bounds.width);
-            return Some((note_id, velocity));
-        }
-    }
-    None
 }
 
 /// Map a point from the keyboard's natural coordinate system to canvas space.
@@ -337,28 +242,15 @@ fn draw_keyboard_range_into(
     let natural = natural_bounds(orientation, bounds);
     let height = natural.height;
     let width = natural.width;
-    let white_notes: &[u8] = if note_count >= 12 {
-        &[0, 2, 4, 5, 7, 9, 11]
-    } else {
-        &[0, 2, 4, 5, 7]
-    };
-    let white_key_count = white_notes.iter().take_while(|&&n| n < note_count).count() as f32;
-    if white_key_count == 0.0 {
-        return;
-    }
-    let white_key_size = height / white_key_count;
+    let note_size = height / f32::from(note_count);
     let black_key_width = width * BLACK_KEY_DEPTH_RATIO;
-    let black_key_length = white_key_size * BLACK_KEY_LENGTH_RATIO;
     let stroke = canvas::Stroke::default().with_width(1.0);
     let h_align = text_align_x(orientation);
     let v_align = text_align_y(orientation);
 
     // White keys, drawn full depth; black keys are overlaid on the back half.
-    for (i, &note_id) in white_notes
-        .iter()
-        .enumerate()
-        .take_while(|&(_, n)| *n < note_count)
-    {
+    let mut u_low = 0.0;
+    for note_id in (0..note_count).filter(|&note| !is_black_key(note)) {
         let midi_note = octave * 12 + note_id;
         let is_pressed = pressed_notes.contains(&note_id);
         let color = if is_pressed {
@@ -366,8 +258,7 @@ fn draw_keyboard_range_into(
         } else {
             Color::WHITE
         };
-        let u_low = i as f32 * white_key_size;
-        let u_high = u_low + white_key_size - 1.0;
+        let u_high = white_key_end(note_id, note_count) * note_size;
 
         let (origin, size) = map_rect(orientation, bounds, u_low, u_high, 0.0, width);
         let rect = Path::rectangle(origin, size);
@@ -387,31 +278,21 @@ fn draw_keyboard_range_into(
                 ..Text::default()
             });
         }
+        u_low = u_high;
     }
 
-    let (black_offsets, black_notes): (&[u8], &[u8]) = if note_count >= 12 {
-        (&[1, 2, 4, 5, 6], &[1, 3, 6, 8, 10])
-    } else {
-        (&[1, 2, 4], &[1, 3, 6])
-    };
-
-    for (idx, &note_id) in black_notes
-        .iter()
-        .enumerate()
-        .take_while(|&(_, n)| *n < note_count)
-    {
+    for note_id in (0..note_count).filter(|&note| is_black_key(note)) {
         let is_pressed = pressed_notes.contains(&note_id);
         let color = if is_pressed {
             Color::from_rgb(0.0, 0.4, 0.8)
         } else {
             Color::BLACK
         };
-        let center = black_offsets[idx] as f32 * white_key_size;
         let (origin, size) = map_rect(
             orientation,
             bounds,
-            center - black_key_length * 0.5,
-            center + black_key_length * 0.5,
+            f32::from(note_id) * note_size,
+            f32::from(note_id + 1) * note_size,
             0.0,
             black_key_width,
         );
@@ -458,155 +339,6 @@ pub fn draw_partial_octave_into(
     );
 }
 
-fn draw_octave_degree270(
-    renderer: &Renderer,
-    bounds: Rectangle,
-    pressed_notes: &HashSet<u8>,
-    octave: u8,
-    midnam_note_names: &HashMap<u8, String>,
-) -> Vec<canvas::Geometry> {
-    let mut frame = Frame::new(renderer, bounds.size());
-    let white_key_height = bounds.height / 7.0;
-
-    for i in 0..7 {
-        let note_id = match i {
-            0 => 0,
-            1 => 2,
-            2 => 4,
-            3 => 5,
-            4 => 7,
-            5 => 9,
-            6 => 11,
-            _ => 0,
-        };
-        let midi_note = octave * 12 + note_id;
-        let is_pressed = pressed_notes.contains(&note_id);
-        let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
-        let rect = Path::rectangle(
-            Point::new(0.0, y_pos),
-            Size::new(bounds.width, white_key_height - 1.0),
-        );
-
-        frame.fill(
-            &rect,
-            if is_pressed {
-                Color::from_rgb(0.0, 0.5, 1.0)
-            } else {
-                Color::WHITE
-            },
-        );
-        frame.stroke(&rect, canvas::Stroke::default().with_width(1.0));
-
-        if let Some(note_name) = midnam_note_names.get(&midi_note) {
-            use iced::widget::canvas::Text;
-            frame.fill_text(Text {
-                content: note_name.clone(),
-                position: Point::new(bounds.width - 25.0, y_pos + white_key_height * 0.5 - 6.0),
-                color: Color::BLACK,
-                size: 10.0.into(),
-                ..Text::default()
-            });
-        }
-    }
-
-    let black_key_offsets = [1, 2, 4, 5, 6];
-    let black_note_ids = [1, 3, 6, 8, 10];
-    let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
-    let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
-
-    for (idx, offset) in black_key_offsets.iter().enumerate() {
-        let note_id = black_note_ids[idx];
-        let is_pressed = pressed_notes.contains(&note_id);
-        let y_pos_black =
-            bounds.height - (*offset as f32 * white_key_height) - (black_key_height * 0.5);
-        let rect = Path::rectangle(
-            Point::new(0.0, y_pos_black),
-            Size::new(black_key_width, black_key_height),
-        );
-
-        frame.fill(
-            &rect,
-            if is_pressed {
-                Color::from_rgb(0.0, 0.4, 0.8)
-            } else {
-                Color::BLACK
-            },
-        );
-    }
-
-    vec![frame.into_geometry()]
-}
-
-fn draw_partial_octave_degree270(
-    renderer: &Renderer,
-    bounds: Rectangle,
-    pressed_notes: &HashSet<u8>,
-    octave: u8,
-    midnam_note_names: &HashMap<u8, String>,
-    note_count: u8,
-) -> Vec<canvas::Geometry> {
-    let mut frame = Frame::new(renderer, bounds.size());
-    let white_note_ids = [0_u8, 2, 4, 5, 7];
-    let black_key_offsets = [1_u8, 2, 4];
-    let black_note_ids = [1_u8, 3, 6];
-    let white_key_height = bounds.height / white_note_ids.len() as f32;
-    let black_key_height = white_key_height * BLACK_KEY_LENGTH_RATIO;
-    let black_key_width = bounds.width * BLACK_KEY_DEPTH_RATIO;
-
-    for (i, note_id) in white_note_ids.iter().enumerate() {
-        let midi_note = octave * 12 + *note_id;
-        let is_pressed = pressed_notes.contains(note_id);
-        let y_pos = bounds.height - ((i + 1) as f32 * white_key_height);
-        let rect = Path::rectangle(
-            Point::new(0.0, y_pos),
-            Size::new(bounds.width, white_key_height - 1.0),
-        );
-        frame.fill(
-            &rect,
-            if is_pressed {
-                Color::from_rgb(0.0, 0.5, 1.0)
-            } else {
-                Color::WHITE
-            },
-        );
-        frame.stroke(&rect, canvas::Stroke::default().with_width(1.0));
-        if let Some(note_name) = midnam_note_names.get(&midi_note) {
-            use iced::widget::canvas::Text;
-            frame.fill_text(Text {
-                content: note_name.clone(),
-                position: Point::new(bounds.width - 25.0, y_pos + white_key_height * 0.5 - 6.0),
-                color: Color::BLACK,
-                size: 10.0.into(),
-                ..Text::default()
-            });
-        }
-    }
-
-    for (idx, offset) in black_key_offsets.iter().enumerate() {
-        let note_id = black_note_ids[idx];
-        if note_id >= note_count {
-            continue;
-        }
-        let is_pressed = pressed_notes.contains(&note_id);
-        let y_pos_black =
-            bounds.height - (f32::from(*offset) * white_key_height) - (black_key_height * 0.5);
-        let rect = Path::rectangle(
-            Point::new(0.0, y_pos_black),
-            Size::new(black_key_width, black_key_height),
-        );
-        frame.fill(
-            &rect,
-            if is_pressed {
-                Color::from_rgb(0.0, 0.4, 0.8)
-            } else {
-                Color::BLACK
-            },
-        );
-    }
-
-    vec![frame.into_geometry()]
-}
-
 pub fn draw_octave(
     renderer: &Renderer,
     bounds: Rectangle,
@@ -615,9 +347,6 @@ pub fn draw_octave(
     midnam_note_names: &HashMap<u8, String>,
     orientation: Orientation,
 ) -> Vec<canvas::Geometry> {
-    if orientation == Orientation::Degree270 {
-        return draw_octave_degree270(renderer, bounds, pressed_notes, octave, midnam_note_names);
-    }
     let mut frame = Frame::new(renderer, bounds.size());
     let local_bounds = Rectangle {
         x: 0.0,
@@ -644,16 +373,6 @@ pub fn draw_partial_octave(
     midnam_note_names: &HashMap<u8, String>,
     orientation: Orientation,
 ) -> Vec<canvas::Geometry> {
-    if orientation == Orientation::Degree270 {
-        return draw_partial_octave_degree270(
-            renderer,
-            bounds,
-            pressed_notes,
-            octave,
-            midnam_note_names,
-            octave_note_count(octave),
-        );
-    }
     let mut frame = Frame::new(renderer, bounds.size());
     let local_bounds = Rectangle {
         x: 0.0,
@@ -822,6 +541,40 @@ mod tests {
     fn action_message(action: CanvasAction<TestMessage>) -> (Option<TestMessage>, event::Status) {
         let (message, _redraw, status) = action.into_inner();
         (message, status)
+    }
+
+    #[test]
+    fn keyboard_hits_match_semitone_columns() {
+        for note_count in [8, 12] {
+            for orientation in [
+                Orientation::Degree0,
+                Orientation::Degree90,
+                Orientation::Degree180,
+                Orientation::Degree270,
+            ] {
+                let length = f32::from(note_count) * 24.0;
+                let size = match orientation {
+                    Orientation::Degree0 | Orientation::Degree180 => Size::new(length, 48.0),
+                    _ => Size::new(48.0, length),
+                };
+                let bounds = Rectangle::new(Point::ORIGIN, size);
+                for note in 0..note_count {
+                    for fraction in [0.01, 0.5, 0.99] {
+                        let cursor = map_point(
+                            orientation,
+                            bounds,
+                            (f32::from(note) + fraction) * 24.0,
+                            12.0,
+                        );
+                        assert_eq!(
+                            note_at_in_range(cursor, bounds, orientation, note_count)
+                                .map(|(note, _)| note),
+                            Some(note)
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

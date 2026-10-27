@@ -1,4 +1,5 @@
 pub mod adsr;
+pub mod arch_range_slider;
 pub mod arch_slider;
 pub mod audio;
 pub mod audio_setup;
@@ -18,6 +19,7 @@ pub mod note_area;
 pub mod numeric_input;
 pub mod piano;
 pub mod piano_roll;
+pub mod range_slider;
 pub mod slider;
 pub mod ticks;
 pub mod vertical_scrollbar;
