@@ -17,17 +17,20 @@ pub enum SelectionEdge {
 
 type RatioMessageFn<'a, Message> = Box<dyn Fn(f32) -> Message + 'a>;
 type RatioPairMessageFn<'a, Message> = Box<dyn Fn((f32, f32)) -> Message + 'a>;
+type ScrollMessageFn<'a, Message> = Box<dyn Fn(f32, f32, f32) -> Message + 'a>;
 
 pub struct SampleWaveform<'a, Message> {
     channels: Vec<&'a [f32]>,
     peak: f32,
     empty_label: &'static str,
+    visible_range: (f32, f32),
     playhead_ratio: Option<f32>,
     selection_ratio: Option<(f32, f32)>,
     xfade_ratio: Option<(f32, f32)>,
     markers: Vec<(usize, String)>,
     on_click: Option<RatioMessageFn<'a, Message>>,
     on_double_click: Option<RatioMessageFn<'a, Message>>,
+    on_scroll: Option<ScrollMessageFn<'a, Message>>,
     on_selection_start: Option<RatioMessageFn<'a, Message>>,
     on_selection_drag: Option<RatioMessageFn<'a, Message>>,
     on_selection_finish: Option<RatioMessageFn<'a, Message>>,
@@ -43,12 +46,14 @@ impl<'a, Message> SampleWaveform<'a, Message> {
             channels: channels.into_iter().collect(),
             peak,
             empty_label: "No sample loaded",
+            visible_range: (0.0, 1.0),
             playhead_ratio: None,
             selection_ratio: None,
             xfade_ratio: None,
             markers: Vec::new(),
             on_click: None,
             on_double_click: None,
+            on_scroll: None,
             on_selection_start: None,
             on_selection_drag: None,
             on_selection_finish: None,
@@ -57,6 +62,17 @@ impl<'a, Message> SampleWaveform<'a, Message> {
             on_middle_click: None,
             on_middle_click_away: None,
         }
+    }
+
+    pub fn visible_range(mut self, visible_range: (f32, f32)) -> Self {
+        let start = visible_range.0.clamp(0.0, 1.0);
+        let end = visible_range.1.clamp(0.0, 1.0);
+        self.visible_range = if start < end {
+            (start, end)
+        } else {
+            (0.0, 1.0)
+        };
+        self
     }
 
     pub fn playhead_ratio(mut self, playhead_ratio: Option<f32>) -> Self {
@@ -121,6 +137,11 @@ impl<'a, Message> SampleWaveform<'a, Message> {
         self
     }
 
+    pub fn on_scroll(mut self, on_scroll: impl Fn(f32, f32, f32) -> Message + 'a) -> Self {
+        self.on_scroll = Some(Box::new(on_scroll));
+        self
+    }
+
     pub fn on_right_click(mut self, on_right_click: impl Fn(f32) -> Message + 'a) -> Self {
         self.on_right_click = Some(Box::new(on_right_click));
         self
@@ -159,6 +180,29 @@ impl<'a, Message> SampleWaveform<'a, Message> {
             .unwrap_or(0)
     }
 
+    fn visible_ratio(&self, ratio: f32) -> Option<f32> {
+        let (start, end) = self.visible_range;
+        if (start..=end).contains(&ratio) {
+            Some((ratio - start) / (end - start))
+        } else {
+            None
+        }
+    }
+
+    fn visible_region(&self, region: (f32, f32)) -> Option<(f32, f32)> {
+        let (view_start, view_end) = self.visible_range;
+        let start = region.0.max(view_start);
+        let end = region.1.min(view_end);
+        if start <= end {
+            Some((
+                (start - view_start) / (view_end - view_start),
+                (end - view_start) / (view_end - view_start),
+            ))
+        } else {
+            None
+        }
+    }
+
     fn near_marker(&self, ratio: f32, width: f32) -> bool {
         if self.markers.is_empty() {
             return false;
@@ -170,13 +214,13 @@ impl<'a, Message> SampleWaveform<'a, Message> {
         let x = width * ratio;
         self.markers
             .iter()
-            .map(|(sample, _)| width * (*sample as f32 / frames as f32))
-            .map(|marker_x| (marker_x - x).abs())
+            .filter_map(|(sample, _)| self.visible_ratio(*sample as f32 / frames as f32))
+            .map(|marker_ratio| (width * marker_ratio - x).abs())
             .any(|distance| distance <= 8.0)
     }
 
     fn selection_edge_at(&self, ratio: f32, width: f32) -> Option<SelectionEdge> {
-        let (start, end) = self.selection_ratio?;
+        let (start, end) = self.visible_region(self.selection_ratio?)?;
         let x = width * ratio;
         let start_distance = (width * start - x).abs();
         let end_distance = (width * end - x).abs();
@@ -199,7 +243,7 @@ impl<'a, Message> SampleWaveform<'a, Message> {
     }
 
     fn publish_xfade(&self, edge: SelectionEdge, ratio: f32) -> Option<CanvasAction<Message>> {
-        let selection = self.selection_ratio?;
+        let selection = self.visible_region(self.selection_ratio?)?;
         let region = xfade_inner_region(selection, edge, ratio);
         self.on_xfade
             .as_ref()
@@ -250,6 +294,16 @@ impl<Message> Program<Message> for SampleWaveform<'_, Message> {
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.modifiers = *modifiers;
                 None
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                let ratio = cursor_ratio(cursor, bounds)?;
+                let delta_y = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => *y,
+                    mouse::ScrollDelta::Pixels { y, .. } => *y / 16.0,
+                };
+                self.on_scroll.as_ref().map(|message| {
+                    CanvasAction::publish(message(delta_y, ratio, bounds.width)).and_capture()
+                })
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cfg!(target_os = "macos") && state.modifiers.alt() =>
@@ -390,17 +444,39 @@ impl<Message> Program<Message> for SampleWaveform<'_, Message> {
             return vec![frame.into_geometry()];
         }
 
-        draw_waveform(&mut frame, bounds, &self.channels, frames, self.peak);
-        if let Some(selection) = self.selection_ratio {
+        draw_waveform(
+            &mut frame,
+            bounds,
+            &self.channels,
+            frames,
+            self.peak,
+            self.visible_range,
+        );
+        if let Some(selection) = self
+            .selection_ratio
+            .and_then(|selection| self.visible_region(selection))
+        {
             draw_selection(&mut frame, bounds, selection);
         }
-        if let Some(xfade) = self.xfade_ratio {
+        if let Some(xfade) = self
+            .xfade_ratio
+            .and_then(|xfade| self.visible_region(xfade))
+        {
             draw_xfade(&mut frame, bounds, xfade);
         }
-        if let Some(ratio) = self.playhead_ratio {
+        if let Some(ratio) = self
+            .playhead_ratio
+            .and_then(|ratio| self.visible_ratio(ratio))
+        {
             draw_playhead(&mut frame, bounds, ratio);
         }
-        draw_markers(&mut frame, bounds, frames, &self.markers);
+        draw_markers(
+            &mut frame,
+            bounds,
+            frames,
+            &self.markers,
+            self.visible_range,
+        );
 
         vec![frame.into_geometry()]
     }
@@ -427,13 +503,19 @@ fn draw_waveform(
     channels: &[&[f32]],
     frames: usize,
     peak: f32,
+    visible_range: (f32, f32),
 ) {
     let width = bounds.width.max(1.0) as usize;
     let height = bounds.height.max(1.0);
     let channel_count = channels.len().max(1);
     let lane_height = height / channel_count as f32;
     let peak = peak.max(1e-10);
-    let samples_per_pixel = frames as f32 / width as f32;
+    let visible_start = ((frames as f32 * visible_range.0) as usize).min(frames - 1);
+    let visible_end = ((frames as f32 * visible_range.1).ceil() as usize)
+        .min(frames)
+        .max(visible_start + 1);
+    let visible_frames = visible_end - visible_start;
+    let samples_per_pixel = visible_frames as f32 / width as f32;
 
     for (channel_index, channel) in channels.iter().enumerate() {
         let top = channel_index as f32 * lane_height;
@@ -442,16 +524,17 @@ fn draw_waveform(
         let mut top_points = Vec::with_capacity(width);
         let mut bottom_points = Vec::with_capacity(width);
         for x in 0..width {
-            let start = ((x as f32 * samples_per_pixel) as usize).min(frames);
-            let end = (((x + 1) as f32 * samples_per_pixel) as usize).min(frames);
+            let start =
+                (visible_start + (x as f32 * samples_per_pixel) as usize).min(visible_end - 1);
+            let end = (visible_start + ((x + 1) as f32 * samples_per_pixel) as usize)
+                .min(visible_end)
+                .max(start + 1);
 
             let mut min_sample = 0.0f32;
             let mut max_sample = 0.0f32;
-            if start < end {
-                for &sample in &channel[start..end] {
-                    min_sample = min_sample.min(sample);
-                    max_sample = max_sample.max(sample);
-                }
+            for &sample in &channel[start..end] {
+                min_sample = min_sample.min(sample);
+                max_sample = max_sample.max(sample);
             }
 
             let y_top = (center - (max_sample / peak) * scale).clamp(top, top + lane_height);
@@ -537,7 +620,13 @@ fn draw_xfade(frame: &mut Frame, bounds: Rectangle, region: (f32, f32)) {
     );
 }
 
-fn draw_markers(frame: &mut Frame, bounds: Rectangle, frames: usize, markers: &[(usize, String)]) {
+fn draw_markers(
+    frame: &mut Frame,
+    bounds: Rectangle,
+    frames: usize,
+    markers: &[(usize, String)],
+    visible_range: (f32, f32),
+) {
     if frames == 0 || markers.is_empty() {
         return;
     }
@@ -548,7 +637,11 @@ fn draw_markers(frame: &mut Frame, bounds: Rectangle, frames: usize, markers: &[
     let text_color = Color::from_rgba(0.98, 0.92, 0.72, 0.96);
 
     for (sample, name) in markers {
-        let ratio = (*sample as f32 / frames as f32).clamp(0.0, 1.0);
+        let global_ratio = (*sample as f32 / frames as f32).clamp(0.0, 1.0);
+        if !(visible_range.0..=visible_range.1).contains(&global_ratio) {
+            continue;
+        }
+        let ratio = (global_ratio - visible_range.0) / (visible_range.1 - visible_range.0);
         let x = bounds.width * ratio;
 
         frame.stroke(
@@ -604,7 +697,19 @@ fn draw_markers(frame: &mut Frame, bounds: Rectangle, frames: usize, markers: &[
 
 #[cfg(test)]
 mod tests {
-    use super::{SelectionEdge, xfade_inner_region};
+    use super::{SampleWaveform, SelectionEdge, xfade_inner_region};
+
+    #[test]
+    fn visible_range_converts_global_ratios() {
+        let waveform = SampleWaveform::<()>::new(std::iter::empty::<&[f32]>(), 0.0)
+            .visible_range((0.25, 0.75));
+        assert_eq!(waveform.visible_ratio(0.5), Some(0.5));
+        assert_eq!(waveform.visible_ratio(0.75), Some(1.0));
+        assert_eq!(waveform.visible_ratio(0.1), None);
+        assert_eq!(waveform.visible_region((0.0, 1.0)), Some((0.0, 1.0)));
+        assert_eq!(waveform.visible_region((0.0, 0.5)), Some((0.0, 0.5)));
+        assert_eq!(waveform.visible_region((0.8, 1.0)), None);
+    }
 
     #[test]
     fn xfade_inner_region_from_start_edge_is_symmetric() {
