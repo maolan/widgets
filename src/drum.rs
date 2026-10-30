@@ -1,6 +1,6 @@
 use crate::midi::PianoNote;
 use iced::{
-    Color, Event, Point, Rectangle, Renderer, Size, Theme, mouse,
+    Color, Event, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
     widget::canvas::{Action as CanvasAction, Frame, Geometry, Path, Program},
 };
 use std::collections::HashSet;
@@ -65,6 +65,8 @@ pub struct DrumRollInteractionState {
     pub creating_dragged: bool,
     pub creating_start_sample: Option<usize>,
     pub creating_pitch: Option<u8>,
+    emulated_middle_click: bool,
+    modifiers: keyboard::Modifiers,
 }
 
 impl DrumRollInteraction {
@@ -136,9 +138,17 @@ impl Program<DrumMessage> for DrumRollInteraction {
         let notes = &self.notes;
 
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = *modifiers;
+                return None;
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if !(cfg!(target_os = "macos") && state.modifiers.control()) =>
+            {
                 if let Some(position) = cursor.position_in(bounds) {
                     if let Some(note_idx) = self.note_at_position(position, pps, notes) {
+                        state.emulated_middle_click =
+                            cfg!(target_os = "macos") && state.modifiers.alt();
                         state.drag_start = Some(position);
                         state.drag_current = Some(position);
                         state.drag_note_index = Some(note_idx);
@@ -159,7 +169,12 @@ impl Program<DrumMessage> for DrumRollInteraction {
                     }
                 }
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+            Event::Mouse(mouse::Event::ButtonPressed(button))
+                if *button == mouse::Button::Right
+                    || (cfg!(target_os = "macos")
+                        && *button == mouse::Button::Left
+                        && state.modifiers.control()) =>
+            {
                 if let Some(position) = cursor.position_in(bounds) {
                     state.drag_start = Some(position);
                     state.drag_current = Some(position);
@@ -211,6 +226,21 @@ impl Program<DrumMessage> for DrumRollInteraction {
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 let mode = state.dragging_mode;
+                if state.emulated_middle_click
+                    && mode == DraggingMode::DraggingNote
+                    && state
+                        .drag_start
+                        .zip(state.drag_current)
+                        .is_some_and(|(start, current)| start.distance(current) < 3.0)
+                    && let Some(note_idx) = state.drag_note_index.take()
+                {
+                    state.drag_start = None;
+                    state.drag_current = None;
+                    state.dragging_mode = DraggingMode::None;
+                    return Some(
+                        CanvasAction::publish(DrumMessage::NoteDelete(note_idx)).and_capture(),
+                    );
+                }
 
                 match mode {
                     DraggingMode::SelectingRect => {
@@ -251,7 +281,12 @@ impl Program<DrumMessage> for DrumRollInteraction {
                     DraggingMode::None => {}
                 }
             }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
+            Event::Mouse(mouse::Event::ButtonReleased(button))
+                if *button == mouse::Button::Right
+                    || (cfg!(target_os = "macos")
+                        && *button == mouse::Button::Left
+                        && state.dragging_mode == DraggingMode::CreatingNote) =>
+            {
                 if state.dragging_mode == DraggingMode::CreatingNote {
                     let start = state.drag_start.take();
                     let current = state.drag_current.take();
