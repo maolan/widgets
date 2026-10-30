@@ -251,6 +251,24 @@ impl<Message> Program<Message> for SampleWaveform<'_, Message> {
                 state.modifiers = *modifiers;
                 None
             }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if cfg!(target_os = "macos") && state.modifiers.alt() =>
+            {
+                state.drag_start = None;
+                state.selecting = false;
+                state.xfade_edge = None;
+                state.last_click_at = None;
+                let ratio = cursor_ratio(cursor, bounds)?;
+                if self.near_marker(ratio, bounds.width) {
+                    self.on_middle_click
+                        .as_ref()
+                        .map(|message| CanvasAction::publish(message(ratio)).and_capture())
+                } else {
+                    self.on_middle_click_away
+                        .as_ref()
+                        .map(|message| CanvasAction::publish(message(ratio)).and_capture())
+                }
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let ratio = cursor_ratio(cursor, bounds)?;
                 let position = cursor.position_in(bounds)?;
@@ -270,7 +288,7 @@ impl<Message> Program<Message> for SampleWaveform<'_, Message> {
                         .map(|message| CanvasAction::publish(message(ratio)).and_capture());
                 }
 
-                if state.modifiers.control()
+                if state.modifiers.command()
                     && let Some(edge) = self.selection_edge_at(ratio, bounds.width)
                 {
                     state.drag_start = None;

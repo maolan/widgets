@@ -1,5 +1,5 @@
 use iced::{
-    Color, Event, Point, Rectangle, Renderer, Size, Theme, mouse,
+    Color, Event, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
     widget::canvas::{Action as CanvasAction, Cache, Frame, Geometry, Path, Program, Stroke},
 };
 use std::cell::Cell;
@@ -46,6 +46,7 @@ pub struct CurveEditor<M: CurveEditorMessage> {
 
 pub struct CurveEditorState {
     mode: CurveEditorDragMode,
+    modifiers: keyboard::Modifiers,
     cache: Cache,
     last_hash: Cell<u64>,
 }
@@ -67,6 +68,7 @@ impl Default for CurveEditorState {
     fn default() -> Self {
         Self {
             mode: CurveEditorDragMode::None,
+            modifiers: keyboard::Modifiers::default(),
             cache: Cache::new(),
             last_hash: Cell::new(0),
         }
@@ -182,7 +184,16 @@ impl<M: CurveEditorMessage> Program<M> for CurveEditor<M> {
         cursor: mouse::Cursor,
     ) -> Option<CanvasAction<M>> {
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = *modifiers;
+                None
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(button))
+                if *button == mouse::Button::Right
+                    || (cfg!(target_os = "macos")
+                        && *button == mouse::Button::Left
+                        && state.modifiers.control()) =>
+            {
                 let position = cursor.position_in(bounds)?;
                 if let Some(idx) = self.point_index_at_position(position, bounds) {
                     let sample = self.points[idx].sample;
@@ -209,7 +220,12 @@ impl<M: CurveEditorMessage> Program<M> for CurveEditor<M> {
                 }
                 None
             }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
+            Event::Mouse(mouse::Event::ButtonReleased(button))
+                if *button == mouse::Button::Right
+                    || (cfg!(target_os = "macos")
+                        && *button == mouse::Button::Left
+                        && matches!(&state.mode, CurveEditorDragMode::Drawing { .. })) =>
+            {
                 if let CurveEditorDragMode::Drawing { start, current } = state.mode {
                     state.mode = CurveEditorDragMode::None;
                     let points = self.build_drawn_points(start, current, bounds);
