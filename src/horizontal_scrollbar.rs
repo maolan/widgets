@@ -7,6 +7,7 @@ use iced::{Border, Color, Element, Event, Length, Point, Rectangle, Size};
 
 pub struct HorizontalScrollbar<'a, Message> {
     content_width: f32,
+    visible_fraction: Option<f32>,
     value: f32,
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
     width: Length,
@@ -21,6 +22,7 @@ impl<'a, Message> HorizontalScrollbar<'a, Message> {
     {
         Self {
             content_width: content_width.max(1.0),
+            visible_fraction: None,
             value,
             on_change: Box::new(on_change),
             width: Length::Fill,
@@ -39,20 +41,30 @@ impl<'a, Message> HorizontalScrollbar<'a, Message> {
         self
     }
 
+    pub fn visible_fraction(mut self, visible_fraction: f32) -> Self {
+        self.visible_fraction = Some(visible_fraction.clamp(0.0, 1.0));
+        self
+    }
+
     fn normalized_value(&self) -> f32 {
         self.value.clamp(0.0, 1.0)
     }
 
+    fn fraction_visible(&self, bounds: Rectangle) -> f32 {
+        self.visible_fraction
+            .unwrap_or_else(|| (bounds.width / self.content_width).clamp(0.0, 1.0))
+    }
+
     fn is_scrollable(&self, bounds: Rectangle) -> bool {
-        self.content_width > bounds.width + f32::EPSILON
+        self.fraction_visible(bounds) < 1.0 - f32::EPSILON
     }
 
     fn handle_width(&self, bounds: Rectangle) -> f32 {
-        if self.content_width <= bounds.width {
+        let visible_fraction = self.fraction_visible(bounds);
+        if visible_fraction >= 1.0 {
             bounds.width
         } else {
-            (bounds.width * (bounds.width / self.content_width))
-                .clamp(self.min_handle_width, bounds.width)
+            (bounds.width * visible_fraction).clamp(self.min_handle_width, bounds.width)
         }
     }
 
@@ -79,11 +91,11 @@ impl<'a, Message> HorizontalScrollbar<'a, Message> {
     }
 
     fn page_step(&self, bounds: Rectangle) -> f32 {
-        let max_scroll = (self.content_width - bounds.width).max(0.0);
-        if max_scroll <= f32::EPSILON {
+        let visible_fraction = self.fraction_visible(bounds);
+        if visible_fraction >= 1.0 {
             1.0
         } else {
-            (bounds.width / max_scroll).clamp(0.0, 1.0)
+            (visible_fraction / (1.0 - visible_fraction)).clamp(0.0, 1.0)
         }
     }
 
@@ -290,6 +302,16 @@ mod tests {
     fn test_layout(width: f32, height: f32) -> Layout<'static> {
         let node = Box::leak(Box::new(layout::Node::new(Size::new(width, height))));
         Layout::new(node)
+    }
+
+    #[test]
+    fn visible_fraction_controls_handle_and_page_step() {
+        let scrollbar = HorizontalScrollbar::new(1.0, 0.5, |value| value).visible_fraction(0.25);
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(100.0, 16.0));
+        assert!(scrollbar.is_scrollable(bounds));
+        assert_eq!(scrollbar.handle_width(bounds), 25.0);
+        assert_eq!(scrollbar.handle_bounds(bounds).x, 37.5);
+        assert!((scrollbar.page_step(bounds) - 1.0 / 3.0).abs() < 1e-6);
     }
 
     #[cfg(debug_assertions)]
