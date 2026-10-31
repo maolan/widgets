@@ -11,6 +11,7 @@ pub mod drum;
 pub mod horizontal_meter;
 pub mod horizontal_scrollbar;
 pub mod horizontal_slider;
+pub mod knob;
 pub mod menu;
 pub mod meters;
 pub mod midi;
