@@ -2,20 +2,23 @@
 use iced::{
     Color, Element, Event, Length, Point, Rectangle, Renderer, Theme, mouse,
     widget::{
-        button, canvas,
+        canvas,
         canvas::{Action, Frame, Geometry, Path, Program, Stroke, Text},
-        column, row, text,
+        column, container, mouse_area, row, text, text_input,
     },
 };
 
 /// Edits emitted by [`adsr_envelope`]. Stage indices follow attack, decay,
 /// sustain, release order.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AdsrMessage {
     Change(usize, f32),
     Release(usize),
     Reset(usize),
     Assign(usize),
+    Edit(usize),
+    EditChanged(usize, String),
+    EditSubmit(usize),
 }
 
 /// Draw an interactive ADSR envelope.
@@ -29,6 +32,27 @@ pub fn adsr_envelope<'a>(
     steps: [f32; 4],
     assigned: [bool; 4],
 ) -> Element<'a, AdsrMessage> {
+    adsr_envelope_with_edit(
+        values,
+        ranges,
+        steps,
+        assigned,
+        None,
+        "",
+        iced::widget::Id::unique(),
+    )
+}
+
+/// Draw an envelope with an optional editable stage value.
+pub fn adsr_envelope_with_edit<'a>(
+    values: [f32; 4],
+    ranges: [(f32, f32); 4],
+    steps: [f32; 4],
+    assigned: [bool; 4],
+    editing: Option<usize>,
+    edit_value: &'a str,
+    input_id: iced::widget::Id,
+) -> Element<'a, AdsrMessage> {
     let graph = Envelope {
         values,
         ranges,
@@ -41,18 +65,30 @@ pub fn adsr_envelope<'a>(
         } else {
             format!("{:.2}s", values[i])
         };
-        button(column![
-            text(["Attack", "Decay", "Sustain", "Release"][i]).size(10),
-            text(value).size(10)
-        ])
-        .padding(2)
-        .width(Length::Fill)
-        .style(button::text)
-        .on_press(AdsrMessage::Assign(i))
-        .into()
+        let label: Element<'a, AdsrMessage> = if editing == Some(i) {
+            text_input::<AdsrMessage, iced::Theme, iced::Renderer>("", edit_value)
+                .id(input_id.clone())
+                .size(10)
+                .on_input(move |value| AdsrMessage::EditChanged(i, value))
+                .on_submit(AdsrMessage::EditSubmit(i))
+                .width(Length::Fill)
+                .into()
+        } else {
+            let content = container(column![
+                text(["Attack", "Decay", "Sustain", "Release"][i]).size(10),
+                text(value).size(10)
+            ])
+            .padding(2)
+            .width(Length::Fill);
+            mouse_area(content)
+                .on_press(AdsrMessage::Assign(i))
+                .on_double_click(AdsrMessage::Edit(i))
+                .into()
+        };
+        label
     }))
     .width(210);
-    column![canvas(graph).width(210).height(115), labels]
+    column![canvas(graph).width(210).height(96), labels]
         .spacing(3)
         .into()
 }
@@ -209,7 +245,7 @@ impl Program<AdsrMessage> for Envelope {
         }
         for (label, position) in [
             ("level", Point::new(0.0, 0.0)),
-            ("time", Point::new(183.0, 102.0)),
+            ("time", Point::new(183.0, 78.0)),
         ] {
             frame.fill_text(Text {
                 content: label.into(),
