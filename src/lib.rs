@@ -21,6 +21,7 @@ pub mod numeric_input;
 pub mod piano;
 pub mod piano_roll;
 pub mod range_slider;
+pub mod shape;
 pub mod slider;
 pub mod ticks;
 pub mod vertical_scrollbar;
