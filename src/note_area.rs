@@ -1,7 +1,7 @@
 use crate::{
     midi::{
-        KEYBOARD_WIDTH, KEYS_SCROLL_ID, MIDI_NOTE_COUNT, NOTES_PER_OCTAVE, NOTES_SCROLL_ID,
-        PITCH_MAX, RIGHT_SCROLL_GUTTER_WIDTH, WHITE_KEY_HEIGHT, WHITE_KEYS_PER_OCTAVE,
+        KEYBOARD_WIDTH, KEYS_SCROLL_ID, NOTES_PER_OCTAVE, NOTES_SCROLL_ID,
+        RIGHT_SCROLL_GUTTER_WIDTH, WHITE_KEY_HEIGHT, WHITE_KEYS_PER_OCTAVE,
     },
     piano,
 };
@@ -24,7 +24,15 @@ pub struct NoteArea {
 
 impl NoteArea {
     pub fn view<'a, Message: 'a>(self, content: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-        let pitch_count = MIDI_NOTE_COUNT;
+        self.view_with_rows(content, &crate::piano_roll::PitchRows::new(None))
+    }
+
+    pub fn view_with_rows<'a, Message: 'a>(
+        self,
+        content: Vec<Element<'a, Message>>,
+        rows: &crate::piano_roll::PitchRows,
+    ) -> Element<'a, Message> {
+        let pitch_count = rows.pitches().len();
         let row_h = ((WHITE_KEY_HEIGHT * WHITE_KEYS_PER_OCTAVE as f32 / NOTES_PER_OCTAVE as f32)
             * self.zoom_y)
             .max(1.0);
@@ -34,8 +42,7 @@ impl NoteArea {
 
         let mut layers: Vec<Element<'a, Message>> = vec![];
 
-        for i in 0..pitch_count {
-            let pitch = PITCH_MAX.saturating_sub(i as u8);
+        for (i, &pitch) in rows.pitches().iter().enumerate() {
             let is_black = piano::is_black_key(pitch);
             layers.push(
                 pin(container("")
@@ -52,6 +59,20 @@ impl NoteArea {
                 .position(Point::new(0.0, i as f32 * row_h))
                 .into(),
             );
+
+            if pitch_count < crate::midi::MIDI_NOTE_COUNT {
+                layers.push(
+                    pin(container("")
+                        .width(Length::Fixed(notes_w))
+                        .height(Length::Fixed(1.0))
+                        .style(|_| container::Style {
+                            background: Some(Background::Color(Color::from_rgb(0.25, 0.25, 0.28))),
+                            ..container::Style::default()
+                        }))
+                    .position(Point::new(0.0, (i + 1) as f32 * row_h - 1.0))
+                    .into(),
+                );
+            }
         }
 
         if let Some(samples_per_bar) = self.samples_per_bar {
