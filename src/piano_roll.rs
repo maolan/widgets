@@ -3,7 +3,7 @@ use crate::{
     piano::{note_color, note_two_edge_gradient, row_height},
 };
 use iced::{
-    Element, Length, Point,
+    Color, Element, Length, Point,
     widget::{container, pin},
 };
 
@@ -53,6 +53,7 @@ pub struct PianoRoll<'a, Message> {
     zoom_x: f32,
     interaction: Element<'a, Message>,
     scale_filter: Option<(u8, &'static [u8])>,
+    note_color: Option<Color>,
 }
 
 impl<'a, Message: 'a> PianoRoll<'a, Message> {
@@ -72,7 +73,13 @@ impl<'a, Message: 'a> PianoRoll<'a, Message> {
             zoom_x,
             interaction,
             scale_filter: None,
+            note_color: None,
         }
+    }
+
+    pub fn with_note_color(mut self, color: Color) -> Self {
+        self.note_color = Some(color);
+        self
     }
 
     pub fn with_scale_filter(mut self, root_semitone: u8, pattern: &'static [u8]) -> Self {
@@ -103,7 +110,9 @@ impl<'a, Message: 'a> PianoRoll<'a, Message> {
             let y = y_idx as f32 * row_h + 1.0;
             let x = note.start_sample as f32 * pps;
             let w = (note.length_samples as f32 * pps).max(2.0);
-            let color = note_color(note.velocity, note.channel);
+            let color = self
+                .note_color
+                .unwrap_or_else(|| note_color(note.velocity, note.channel));
             layers.push(
                 pin(container("")
                     .width(Length::Fixed(w))
