@@ -1,8 +1,11 @@
+#![recursion_limit = "256"]
+
 pub mod adsr;
 pub mod arch_range_slider;
 pub mod arch_slider;
 pub mod audio;
 pub mod audio_setup;
+pub mod cached_canvas;
 pub mod clip;
 mod consts;
 pub mod controller;

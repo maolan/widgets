@@ -2064,12 +2064,14 @@ dependencies = [
 
 [[package]]
 name = "maolan-widgets"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
+ "bytemuck",
  "iced",
  "iced_aw",
  "iced_drop",
  "iced_fonts",
+ "iced_wgpu",
  "serde",
  "symphonia",
 ]

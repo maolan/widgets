@@ -349,7 +349,7 @@ fn fade_bezier_overlay<Message: 'static>(
     color: Color,
     fade_out: bool,
 ) -> Element<'static, Message> {
-    canvas(FadeBezierCanvas { color, fade_out })
+    crate::cached_canvas::cached_canvas(FadeBezierCanvas { color, fade_out })
         .width(Length::Fixed(width.max(0.0)))
         .height(Length::Fixed(height.max(0.0)))
         .into()
@@ -958,7 +958,7 @@ fn midi_clip_notes_overlay<Message: 'static>(
     clip_visible_length_samples: usize,
     reversed: bool,
 ) -> Element<'static, Message> {
-    canvas(MidiClipNotesCanvas {
+    crate::cached_canvas::cached_canvas(MidiClipNotesCanvas {
         notes,
         clip_offset_samples,
         clip_visible_length_samples,
@@ -970,7 +970,7 @@ fn midi_clip_notes_overlay<Message: 'static>(
 }
 
 fn audio_waveform_overlay<Message: 'static>(waveform: WaveformCanvas) -> Element<'static, Message> {
-    canvas(waveform)
+    crate::cached_canvas::cached_canvas(waveform)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
