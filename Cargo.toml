@@ -1,6 +1,6 @@
 [package]
 name = "maolan-widgets"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 description = "Widgets used for Maolan DAW"
 license = "BSD-2-Clause"
@@ -19,4 +19,3 @@ iced_drop = { version = "0.2.54", features = ["helpers"] }
 iced_fonts = { version = "0.3.0", features = ["lucide"] }
 iced_wgpu = "0.14.0"
 serde = { version = "1.0.229", features = ["derive"] }
-symphonia = { version = "0.6.1", features = ["wav"] }

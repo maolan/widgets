@@ -153,7 +153,7 @@ pub fn meters<'a, Message>(
 where
     Message: 'a,
 {
-    canvas(MetersCanvas {
+    crate::cached_canvas::cached_canvas(MetersCanvas {
         channels: channels.max(1),
         levels_qdb: SmallMeterLevels::from_db(levels_db, channels),
         fader_height,

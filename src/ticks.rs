@@ -251,7 +251,7 @@ pub fn ticks<'a, Message>(
 where
     Message: 'a,
 {
-    canvas(TicksCanvas {
+    crate::cached_canvas::cached_canvas(TicksCanvas {
         spec: TickSpec::Range(range),
         height: fader_height,
     })
@@ -264,7 +264,7 @@ pub fn x32_ticks<'a, Message>(height: f32) -> Element<'a, Message>
 where
     Message: 'a,
 {
-    canvas(TicksCanvas {
+    crate::cached_canvas::cached_canvas(TicksCanvas {
         spec: TickSpec::Custom(
             vec![-90.0, -60.0, -40.0, -20.0, -10.0, -5.0, 0.0, 5.0, 10.0],
             TickMapping::X32Fader,
@@ -280,7 +280,7 @@ pub fn meter_ticks<'a, Message>(height: f32) -> Element<'a, Message>
 where
     Message: 'a,
 {
-    canvas(TicksCanvas {
+    crate::cached_canvas::cached_canvas(TicksCanvas {
         spec: TickSpec::Custom(
             vec![-90.0, -60.0, -40.0, -20.0, -12.0, -6.0, 0.0, 10.0, 20.0],
             TickMapping::Linear {
