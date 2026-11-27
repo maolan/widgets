@@ -1,3 +1,7 @@
+use crate::consts::{
+    CONTROL_BACKGROUND_COLOR, CONTROL_BORDER_COLOR, CONTROL_FILLED_COLOR, CONTROL_HANDLE_COLOR,
+    CONTROL_SELECTED_TEXT_COLOR, CONTROL_TEXT_COLOR,
+};
 use iced::advanced::Shell;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
@@ -39,6 +43,7 @@ pub struct MultiToggler<'a, Message> {
     background_color: Color,
     border_color: Color,
     selected_color: Color,
+    handle_color: Color,
     text_color: Color,
     selected_text_color: Color,
     size: f32,
@@ -66,27 +71,12 @@ impl<'a, Message> MultiToggler<'a, Message> {
             width: Length::Shrink,
             height: Length::Shrink,
             text_size: Pixels(12.0),
-            background_color: Color::from_rgb(
-                0x42 as f32 / 255.0,
-                0x46 as f32 / 255.0,
-                0x4D as f32 / 255.0,
-            ),
-            border_color: Color::from_rgb(
-                0x30 as f32 / 255.0,
-                0x33 as f32 / 255.0,
-                0x3C as f32 / 255.0,
-            ),
-            selected_color: Color::from_rgb(
-                0x29 as f32 / 255.0,
-                0x66 as f32 / 255.0,
-                0xA3 as f32 / 255.0,
-            ),
-            text_color: Color::from_rgb(
-                0xD7 as f32 / 255.0,
-                0xDA as f32 / 255.0,
-                0xE0 as f32 / 255.0,
-            ),
-            selected_text_color: Color::WHITE,
+            background_color: CONTROL_BACKGROUND_COLOR,
+            border_color: CONTROL_BORDER_COLOR,
+            selected_color: CONTROL_FILLED_COLOR,
+            handle_color: CONTROL_HANDLE_COLOR,
+            text_color: CONTROL_TEXT_COLOR,
+            selected_text_color: CONTROL_SELECTED_TEXT_COLOR,
             size: 16.0,
             spacing: 8.0,
             label_extent: 72.0,
@@ -143,6 +133,11 @@ impl<'a, Message> MultiToggler<'a, Message> {
         self
     }
 
+    pub fn handle_color(mut self, color: Color) -> Self {
+        self.handle_color = color;
+        self
+    }
+
     pub fn text_color(mut self, color: Color) -> Self {
         self.text_color = color;
         self
@@ -177,8 +172,11 @@ impl<'a, Message> MultiToggler<'a, Message> {
         let track = self.track_size();
         let label_height = self.label_height();
         let (offset_x, offset_y) = match self.label_position {
-            LabelPosition::Above => (0.0, label_height + self.spacing),
-            LabelPosition::Below => (0.0, 0.0),
+            LabelPosition::Above => (
+                (bounds.width - track.width).max(0.0) * 0.5,
+                label_height + self.spacing,
+            ),
+            LabelPosition::Below => ((bounds.width - track.width).max(0.0) * 0.5, 0.0),
             LabelPosition::Left => (self.label_extent + self.spacing, 0.0),
             LabelPosition::Right => (0.0, 0.0),
         };
@@ -203,18 +201,43 @@ impl<'a, Message> MultiToggler<'a, Message> {
         }
     }
 
+    fn selected_track_bounds(&self, track: Rectangle) -> Rectangle {
+        let selected = self.selected();
+        let center = self.option_center(track, selected);
+        let padding = (0.1 * self.size).round();
+        let radius = (self.size - 2.0 * padding).max(1.0) * 0.5;
+        match self.orientation {
+            Orientation::Horizontal => Rectangle {
+                width: if selected == 0 {
+                    0.0
+                } else {
+                    center.x + radius - track.x
+                },
+                ..track
+            },
+            Orientation::Vertical => Rectangle {
+                height: if selected == 0 {
+                    0.0
+                } else {
+                    center.y + radius - track.y
+                },
+                ..track
+            },
+        }
+    }
+
     fn label_bounds(&self, bounds: Rectangle) -> Rectangle {
         let track = self.track_bounds(bounds);
         let label_height = self.label_height();
         match self.label_position {
             LabelPosition::Above => Rectangle {
-                x: track.x,
+                x: track.center_x() - self.label_extent * 0.5,
                 y: bounds.y,
                 width: self.label_extent,
                 height: label_height,
             },
             LabelPosition::Below => Rectangle {
-                x: track.x,
+                x: track.center_x() - self.label_extent * 0.5,
                 y: track.y + track.height + self.spacing,
                 width: self.label_extent,
                 height: label_height,
@@ -358,6 +381,23 @@ where
         );
 
         if !self.labels.is_empty() {
+            let selected_bounds = self.selected_track_bounds(track);
+            if self.selected() > 0 {
+                let selected_radius = selected_bounds.width.min(selected_bounds.height) / 2.0;
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: selected_bounds,
+                        border: Border {
+                            radius: selected_radius.into(),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
+                        ..Default::default()
+                    },
+                    self.selected_color,
+                );
+            }
+
             let padding = (0.1 * self.size).round();
             let diameter = (self.size - 2.0 * padding).max(1.0);
             let center = self.option_center(track, self.selected());
@@ -376,7 +416,7 @@ where
                     },
                     ..Default::default()
                 },
-                self.selected_color,
+                self.handle_color,
             );
         }
 
@@ -389,12 +429,21 @@ where
                     size: self.text_size,
                     line_height: text::LineHeight::default(),
                     font: renderer.default_font(),
-                    align_x: text::Alignment::Left,
+                    align_x: match self.label_position {
+                        LabelPosition::Above | LabelPosition::Below => text::Alignment::Center,
+                        LabelPosition::Left | LabelPosition::Right => text::Alignment::Left,
+                    },
                     align_y: alignment::Vertical::Center,
                     shaping: text::Shaping::default(),
                     wrapping: text::Wrapping::None,
                 },
-                Point::new(label_bounds.x, label_bounds.center_y()),
+                Point::new(
+                    match self.label_position {
+                        LabelPosition::Above | LabelPosition::Below => label_bounds.center_x(),
+                        LabelPosition::Left | LabelPosition::Right => label_bounds.x,
+                    },
+                    label_bounds.center_y(),
+                ),
                 self.text_color,
                 *viewport,
             );
@@ -513,10 +562,71 @@ mod tests {
             height: 24.0,
         };
 
-        assert_eq!(toggler.index_at(Point::new(10.0, 30.0), bounds), Some(0));
-        assert_eq!(toggler.index_at(Point::new(30.0, 30.0), bounds), Some(1));
-        assert_eq!(toggler.index_at(Point::new(57.0, 30.0), bounds), Some(2));
-        assert_eq!(toggler.index_at(Point::new(59.0, 30.0), bounds), None);
+        assert_eq!(toggler.index_at(Point::new(31.0, 30.0), bounds), Some(0));
+        assert_eq!(toggler.index_at(Point::new(52.0, 30.0), bounds), Some(1));
+        assert_eq!(toggler.index_at(Point::new(68.0, 30.0), bounds), Some(2));
+        assert_eq!(toggler.index_at(Point::new(80.0, 30.0), bounds), None);
+    }
+
+    #[test]
+    fn horizontal_selection_fills_from_left_to_handle() {
+        let toggler = horizontal_multi_toggler(["A", "B", "C"], 1, |index| index);
+        let bounds = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: 48.0,
+            height: 16.0,
+        };
+        let track = toggler.track_bounds(bounds);
+        let selected = toggler.selected_track_bounds(track);
+
+        assert_eq!(selected.x, track.x);
+        assert_eq!(selected.width, 30.0);
+        assert_eq!(selected.y, track.y);
+        assert_eq!(selected.height, track.height);
+    }
+
+    #[test]
+    fn vertical_selection_fills_from_top_to_handle() {
+        let toggler = vertical_multi_toggler(["A", "B", "C"], 2, |index| index);
+        let bounds = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: 16.0,
+            height: 48.0,
+        };
+        let track = toggler.track_bounds(bounds);
+        let selected = toggler.selected_track_bounds(track);
+
+        assert_eq!(selected.x, track.x);
+        assert_eq!(selected.width, track.width);
+        assert_eq!(selected.y, track.y);
+        assert_eq!(selected.height, 46.0);
+    }
+
+    #[test]
+    fn first_selection_has_no_filled_background() {
+        let horizontal = horizontal_multi_toggler(["A", "B"], 0, |index| index);
+        let vertical = vertical_multi_toggler(["A", "B"], 0, |index| index);
+        let bounds = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: 32.0,
+            height: 32.0,
+        };
+
+        assert_eq!(
+            horizontal
+                .selected_track_bounds(horizontal.track_bounds(bounds))
+                .width,
+            0.0
+        );
+        assert_eq!(
+            vertical
+                .selected_track_bounds(vertical.track_bounds(bounds))
+                .height,
+            0.0
+        );
     }
 
     #[test]
@@ -530,12 +640,12 @@ mod tests {
         };
 
         let track = toggler.track_bounds(bounds);
-        assert_eq!(track.x, bounds.x);
+        assert_eq!(track.center_x(), bounds.center_x());
         assert_eq!(track.width, 48.0);
         assert_eq!(track.y, bounds.y + toggler.label_height() + toggler.spacing);
 
         let label = toggler.label_bounds(bounds);
-        assert_eq!(label.x, track.x);
+        assert_eq!(label.center_x(), track.center_x());
         assert_eq!(label.width, 72.0);
         assert!(label.y < track.y, "label should sit above the track");
     }
@@ -556,7 +666,7 @@ mod tests {
 
         let label = toggler.label_bounds(bounds);
         assert!(label.y > track.y, "label should sit below the track");
-        assert_eq!(label.x, track.x);
+        assert_eq!(label.center_x(), track.center_x());
     }
 
     #[test]
@@ -619,7 +729,7 @@ mod tests {
         let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
             .label_position(LabelPosition::Below);
         let mut tree = test_tree();
-        let layout = test_layout(90.0, 24.0);
+        let layout = test_layout(48.0, 24.0);
         let mut messages = Vec::new();
         let mut shell = Shell::new(&mut messages);
         let renderer = ();
@@ -647,7 +757,7 @@ mod tests {
         let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 0, |index| index)
             .label_position(LabelPosition::Below);
         let mut tree = test_tree();
-        let layout = test_layout(90.0, 24.0);
+        let layout = test_layout(48.0, 24.0);
         let renderer = ();
         let mut clipboard = clipboard::Null;
         let viewport = Rectangle::new(Point::ORIGIN, Size::new(90.0, 24.0));
@@ -694,7 +804,7 @@ mod tests {
         let mut toggler = horizontal_multi_toggler(["A", "B", "C"], 1, |index| index)
             .label_position(LabelPosition::Below);
         let mut tree = test_tree();
-        let layout = test_layout(90.0, 24.0);
+        let layout = test_layout(48.0, 24.0);
         let mut messages = Vec::new();
         let mut shell = Shell::new(&mut messages);
         let renderer = ();
