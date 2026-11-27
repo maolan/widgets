@@ -145,7 +145,7 @@ pub fn horizontal_meter<'a, Message>(channels: usize, levels_db: &[f32]) -> Elem
 where
     Message: 'a,
 {
-    canvas(HorizontalMeterCanvas {
+    crate::cached_canvas::cached_canvas(HorizontalMeterCanvas {
         channels: channels.max(1),
         levels_qdb: SmallMeterLevels::from_db(levels_db, channels),
     })

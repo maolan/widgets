@@ -1,4 +1,3 @@
-use crate::audio::read_wav_f32;
 use crate::midi::{PITCH_MAX, PianoNote};
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Theme, gradient, mouse,
@@ -11,7 +10,6 @@ use iced::{
 use std::{
     cell::Cell,
     hash::{Hash, Hasher},
-    path::PathBuf,
     sync::Arc,
 };
 pub type PeakPair = [f32; 2];
@@ -364,7 +362,6 @@ struct WaveformCanvasState {
 #[derive(Clone)]
 struct WaveformCanvas {
     peaks: ClipPeaks,
-    source_wav_path: Option<PathBuf>,
     clip_offset: usize,
     clip_length: usize,
     max_length: usize,
@@ -437,58 +434,47 @@ impl WaveformCanvas {
     }
 
     fn source_column_peaks(
-        source_wav_path: &std::path::Path,
-        channel_count: usize,
+        peaks: &ClipPeaks,
+        source_length: usize,
         source_start_sample: usize,
         source_end_sample: usize,
         total_columns: usize,
     ) -> Option<Vec<Vec<[f32; 2]>>> {
-        if total_columns == 0 || source_end_sample <= source_start_sample || channel_count == 0 {
+        if total_columns == 0 || source_end_sample <= source_start_sample || peaks.is_empty() {
             return None;
         }
-        let (samples, wav_channels, _sample_rate) = read_wav_f32(source_wav_path).ok()?;
-        let use_channels = channel_count.min(wav_channels).max(1);
-        let total_frames = samples.len() / wav_channels;
-        if source_start_sample >= total_frames {
+        let source_length = source_length.max(1);
+        if source_start_sample >= source_length {
             return None;
         }
-        let read_end = source_end_sample.min(total_frames);
+        let read_end = source_end_sample.min(source_length);
         let read_frames = read_end.saturating_sub(source_start_sample);
         if read_frames == 0 {
             return None;
         }
 
-        let start_sample = source_start_sample.saturating_mul(wav_channels);
-        let end_sample = read_end.saturating_mul(wav_channels);
-        let chunk = &samples[start_sample..end_sample];
-        if chunk.is_empty() {
-            return None;
-        }
-
-        let mut out = vec![vec![[0.0_f32, 0.0_f32]; total_columns]; channel_count];
+        let mut out = vec![vec![[0.0_f32, 0.0_f32]; total_columns]; peaks.len()];
         for col in 0..total_columns {
-            let frame_start = (col * read_frames) / total_columns;
-            let mut frame_end = ((col + 1) * read_frames) / total_columns;
+            let frame_start = source_start_sample + (col * read_frames) / total_columns;
+            let mut frame_end = source_start_sample + ((col + 1) * read_frames) / total_columns;
             if frame_end <= frame_start {
-                frame_end = (frame_start + 1).min(read_frames);
+                frame_end = (frame_start + 1).min(read_end);
             }
-            if frame_start >= frame_end {
-                continue;
-            }
-            for (ch, out_channel) in out.iter_mut().enumerate().take(use_channels) {
-                let mut min_val = 1.0_f32;
-                let mut max_val = -1.0_f32;
-                for frame_idx in frame_start..frame_end {
-                    let sample_idx = frame_idx.saturating_mul(wav_channels).saturating_add(ch);
-                    let s = chunk
-                        .get(sample_idx)
-                        .copied()
-                        .unwrap_or(0.0)
-                        .clamp(-1.0, 1.0);
-                    min_val = min_val.min(s);
-                    max_val = max_val.max(s);
+            for (channel_peaks, out_channel) in peaks.iter().zip(out.iter_mut()) {
+                let total_bins = channel_peaks.len();
+                if total_bins == 0 {
+                    continue;
                 }
-                out_channel[col] = [min_val, max_val];
+                let bin_start = (frame_start * total_bins / source_length).min(total_bins - 1);
+                let mut bin_end = (frame_end * total_bins / source_length).min(total_bins);
+                if bin_end <= bin_start {
+                    bin_end = (bin_start + 1).min(total_bins);
+                }
+                if let Some((min_val, max_val)) =
+                    Self::aggregate_column_peak(channel_peaks, bin_start, bin_end)
+                {
+                    out_channel[col] = [min_val, max_val];
+                }
             }
         }
 
@@ -590,8 +576,8 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                     let trace_mode = high_zoom_source_mode
                         || required_samples_per_px <= 4.0
                         || visible_bins <= pixel_columns.saturating_mul(2);
-                    let use_source_columns = self.source_wav_path.is_some()
-                        && required_samples_per_px + f32::EPSILON < stored_samples_per_bin;
+                    let use_source_columns =
+                        required_samples_per_px + f32::EPSILON < stored_samples_per_bin;
                     let mut source_mode_columns = total_columns;
                     let mut source_mode_margin = margin_columns;
                     let mut source_mode_x_step = x_step;
@@ -620,15 +606,13 @@ impl<Message> canvas::Program<Message> for WaveformCanvas {
                             }
                             .max(1),
                         );
-                        self.source_wav_path.as_ref().and_then(|path| {
-                            Self::source_column_peaks(
-                                path,
-                                self.peaks.len(),
-                                source_start,
-                                source_end,
-                                source_mode_columns,
-                            )
-                        })
+                        Self::source_column_peaks(
+                            &self.peaks,
+                            max_len,
+                            source_start,
+                            source_end,
+                            source_mode_columns,
+                        )
                     } else {
                         None
                     };
@@ -976,18 +960,8 @@ fn audio_waveform_overlay<Message: 'static>(waveform: WaveformCanvas) -> Element
         .into()
 }
 
-fn resolve_audio_clip_path(session_root: Option<&PathBuf>, clip_name: &str) -> Option<PathBuf> {
-    let path = PathBuf::from(clip_name);
-    if path.is_absolute() {
-        Some(path)
-    } else {
-        session_root.map(|root| root.join(path))
-    }
-}
-
 fn grouped_audio_waveform_overlay<Message: 'static>(
     clip: &AudioClipData,
-    session_root: Option<&PathBuf>,
     pixels_per_sample: f32,
     clip_height: f32,
     log_scaled: bool,
@@ -996,17 +970,10 @@ fn grouped_audio_waveform_overlay<Message: 'static>(
     for child in &clip.grouped_clips {
         let child_width = (child.length as f32 * pixels_per_sample).max(12.0);
         let child_overlay = if child.is_group() {
-            grouped_audio_waveform_overlay(
-                child,
-                session_root,
-                pixels_per_sample,
-                clip_height,
-                log_scaled,
-            )
+            grouped_audio_waveform_overlay(child, pixels_per_sample, clip_height, log_scaled)
         } else {
             audio_waveform_overlay(WaveformCanvas {
                 peaks: child.peaks.clone(),
-                source_wav_path: resolve_audio_clip_path(session_root, &child.name),
                 clip_offset: child.offset,
                 clip_length: child.length,
                 max_length: child.max_length_samples,
@@ -1037,7 +1004,6 @@ enum AudioClipMode {
 
 pub struct AudioClip<Message> {
     clip: AudioClipData,
-    session_root: Option<PathBuf>,
     pixels_per_sample: f32,
     clip_width: f32,
     clip_height: f32,
@@ -1078,7 +1044,6 @@ impl<Message> AudioClip<Message> {
 
     pub fn waveform_overlay(
         peaks: ClipPeaks,
-        source_wav_path: Option<PathBuf>,
         clip_offset: usize,
         clip_length: usize,
         max_length: usize,
@@ -1089,7 +1054,6 @@ impl<Message> AudioClip<Message> {
     {
         Self::waveform_overlay_scaled(
             peaks,
-            source_wav_path,
             clip_offset,
             clip_length,
             max_length,
@@ -1100,7 +1064,6 @@ impl<Message> AudioClip<Message> {
 
     pub fn waveform_overlay_scaled(
         peaks: ClipPeaks,
-        source_wav_path: Option<PathBuf>,
         clip_offset: usize,
         clip_length: usize,
         max_length: usize,
@@ -1112,7 +1075,6 @@ impl<Message> AudioClip<Message> {
     {
         audio_waveform_overlay(WaveformCanvas {
             peaks,
-            source_wav_path,
             clip_offset,
             clip_length,
             max_length,
@@ -1128,7 +1090,6 @@ impl<Message: Clone + 'static> AudioClip<Message> {
     pub fn new(clip: AudioClipData) -> Self {
         Self {
             clip,
-            session_root: None,
             pixels_per_sample: 1.0,
             clip_width: 12.0,
             clip_height: 8.0,
@@ -1161,11 +1122,6 @@ impl<Message: Clone + 'static> AudioClip<Message> {
         self.selected_base_color = selected_base_color;
         self.border = border;
         self.selected_border = selected_border;
-        self
-    }
-
-    pub fn with_session_root(mut self, session_root: Option<&PathBuf>) -> Self {
-        self.session_root = session_root.cloned();
         self
     }
 
@@ -1220,10 +1176,6 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                 let preview_content = container(Stack::with_children(vec![
                     audio_waveform_overlay(WaveformCanvas {
                         peaks: self.clip.peaks.clone(),
-                        source_wav_path: resolve_audio_clip_path(
-                            self.session_root.as_ref(),
-                            &self.clip.name,
-                        ),
                         clip_offset: self.clip.offset,
                         clip_length: self.clip.length,
                         max_length: self.clip.max_length_samples,
@@ -1289,7 +1241,6 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                     if self.clip.is_group() {
                         grouped_audio_waveform_overlay(
                             &self.clip,
-                            self.session_root.as_ref(),
                             self.pixels_per_sample,
                             self.clip_height,
                             self.log_scaled,
@@ -1297,10 +1248,6 @@ impl<Message: Clone + 'static> AudioClip<Message> {
                     } else {
                         audio_waveform_overlay(WaveformCanvas {
                             peaks: self.clip.peaks.clone(),
-                            source_wav_path: resolve_audio_clip_path(
-                                self.session_root.as_ref(),
-                                &self.clip.name,
-                            ),
                             clip_offset: self.clip.offset,
                             clip_length: self.clip.length,
                             max_length: self.clip.max_length_samples,
@@ -1767,6 +1714,19 @@ impl<Message: Clone + 'static> MIDIClip<Message> {
 #[cfg(test)]
 mod tests {
     use super::{WaveformCanvas, should_draw_fade_overlay, visible_fade_overlay_width};
+
+    #[test]
+    fn source_columns_aggregate_supplied_peaks() {
+        let peaks = std::sync::Arc::new(vec![vec![
+            [-0.2, 0.4],
+            [-0.8, 0.1],
+            [-0.1, 0.9],
+            [-0.3, 0.5],
+        ]]);
+        let columns =
+            WaveformCanvas::source_column_peaks(&peaks, 4, 0, 4, 2).expect("source columns");
+        assert_eq!(columns, vec![vec![[-0.8, 0.4], [-0.3, 0.9]]]);
+    }
 
     #[test]
     fn log_scale_sample_maps_full_scale_to_unity() {
