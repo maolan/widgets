@@ -1,4 +1,7 @@
-use crate::consts::DOUBLE_CLICK;
+use crate::consts::{
+    CONTROL_BACKGROUND_COLOR, CONTROL_BORDER_COLOR, CONTROL_FILLED_COLOR, CONTROL_HANDLE_COLOR,
+    DOUBLE_CLICK,
+};
 #[cfg(test)]
 use iced::Point;
 use iced::advanced::Shell;
@@ -142,27 +145,6 @@ where
         let normalized =
             (self.value - self.range.start()) / (self.range.end() - self.range.start());
 
-        let back_color = Color::from_rgb(
-            0x42 as f32 / 255.0,
-            0x46 as f32 / 255.0,
-            0x4D as f32 / 255.0,
-        );
-        let border_color = Color::from_rgb(
-            0x30 as f32 / 255.0,
-            0x33 as f32 / 255.0,
-            0x3C as f32 / 255.0,
-        );
-        let filled_color = Color::from_rgb(
-            0x29 as f32 / 255.0,
-            0x66 as f32 / 255.0,
-            0xA3 as f32 / 255.0,
-        );
-        let handle_color = Color::from_rgb(
-            0x75 as f32 / 255.0,
-            0xC2 as f32 / 255.0,
-            0xFF as f32 / 255.0,
-        );
-
         let border_radius = 2.0;
         let handle_filled_gap = 1.0;
 
@@ -177,11 +159,11 @@ where
                 border: Border {
                     radius: border_radius.into(),
                     width: border_width,
-                    color: border_color,
+                    color: CONTROL_BORDER_COLOR,
                 },
                 ..Default::default()
             },
-            back_color,
+            CONTROL_BACKGROUND_COLOR,
         );
 
         match self.orientation {
@@ -211,7 +193,7 @@ where
                             },
                             ..Default::default()
                         },
-                        filled_color,
+                        CONTROL_FILLED_COLOR,
                     );
                 }
 
@@ -230,7 +212,7 @@ where
                         },
                         ..Default::default()
                     },
-                    handle_color,
+                    CONTROL_HANDLE_COLOR,
                 );
             }
             Orientation::Horizontal => {
@@ -258,7 +240,7 @@ where
                             },
                             ..Default::default()
                         },
-                        filled_color,
+                        CONTROL_FILLED_COLOR,
                     );
                 }
 
@@ -277,7 +259,7 @@ where
                         },
                         ..Default::default()
                     },
-                    handle_color,
+                    CONTROL_HANDLE_COLOR,
                 );
             }
         }
