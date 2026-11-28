@@ -153,7 +153,8 @@ pub fn meters<'a, Message>(
 where
     Message: 'a,
 {
-    crate::cached_canvas::cached_canvas(MetersCanvas {
+    // Keep the cached background and live bars in the same geometry pass.
+    canvas(MetersCanvas {
         channels: channels.max(1),
         levels_qdb: SmallMeterLevels::from_db(levels_db, channels),
         fader_height,
